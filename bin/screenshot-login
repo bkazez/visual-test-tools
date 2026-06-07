@@ -1,0 +1,92 @@
+#!/bin/bash
+# Screenshot a page that requires a form login (session cookie), by submitting
+# the login form first. For HTTP basic auth use `screenshot -a` instead.
+#
+# Usage: screenshot-login -U EMAIL -P PASSWORD [options] /path/after/login
+#
+# Options:
+#   -u URL             Base URL (default: http://localhost:3000)
+#   -U EMAIL           Login username/email (required)
+#   -P PASSWORD        Login password (required)
+#   -L PATH            Login form path (default: /login)
+#   -s WIDTHxHEIGHT    Viewport size (default: 1280x900)
+#   -f                 Full-page screenshot
+#   -o FILE            Output file (default: /tmp/screenshot.png)
+#   --user-sel SEL     Email field selector (default: input[name="email"])
+#   --pass-sel SEL     Password field selector (default: input[name="password"])
+#   --submit-sel SEL   Submit button selector (default: button[type="submit"])
+#
+# Example:
+#   screenshot-login -u http://localhost:3100 -U demo@example.com -P password123 \
+#     -s 1280x900 -f -o /tmp/dash.png /dashboard/insights
+
+set -e
+
+TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BASE_URL="http://localhost:3000"
+LOGIN_PATH="/login"
+EMAIL=""; PASSWORD=""
+VIEWPORT_WIDTH=1280; VIEWPORT_HEIGHT=900
+FULL_PAGE=false
+OUTPUT_FILE="/tmp/screenshot.png"
+USER_SEL='input[name="email"]'
+PASS_SEL='input[name="password"]'
+SUBMIT_SEL='button[type="submit"]'
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u) BASE_URL="$2"; shift 2 ;;
+    -U) EMAIL="$2"; shift 2 ;;
+    -P) PASSWORD="$2"; shift 2 ;;
+    -L) LOGIN_PATH="$2"; shift 2 ;;
+    -s) IFS='x' read -r VIEWPORT_WIDTH VIEWPORT_HEIGHT <<< "$2"; shift 2 ;;
+    -f) FULL_PAGE=true; shift ;;
+    -o) OUTPUT_FILE="$2"; shift 2 ;;
+    --user-sel) USER_SEL="$2"; shift 2 ;;
+    --pass-sel) PASS_SEL="$2"; shift 2 ;;
+    --submit-sel) SUBMIT_SEL="$2"; shift 2 ;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) TARGET_PATH="$1"; shift ;;
+  esac
+done
+
+TARGET_PATH="${TARGET_PATH:-/}"
+if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; then echo "Need -U EMAIL and -P PASSWORD" >&2; exit 1; fi
+
+CHROME_DIR="$HOME/.cache/puppeteer/chrome"
+CHROME_VERSION="$(ls "$CHROME_DIR" | sort -V | tail -1)"
+if [ "$(uname -m)" = "arm64" ]; then
+  CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+else
+  CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+fi
+if [ ! -x "$CHROME_PATH" ]; then echo "Chrome for Testing not found. Run: npx puppeteer browsers install chrome" >&2; exit 1; fi
+
+cd "$TOOL_DIR"
+node --input-type=module -e "
+import puppeteer from 'puppeteer';
+const browser = await puppeteer.launch({ headless: true, executablePath: '$CHROME_PATH' });
+try {
+  const page = await browser.newPage();
+  await page.setViewport({ width: $VIEWPORT_WIDTH, height: $VIEWPORT_HEIGHT });
+  await page.goto('$BASE_URL$LOGIN_PATH', { waitUntil: 'networkidle2', timeout: 15000 });
+  await page.type('$USER_SEL', '$EMAIL');
+  await page.type('$PASS_SEL', '$PASSWORD');
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }),
+    page.click('$SUBMIT_SEL'),
+  ]);
+  await page.goto('$BASE_URL$TARGET_PATH', { waitUntil: 'networkidle2', timeout: 15000 });
+  if ($FULL_PAGE) {
+    await page.screenshot({ path: '$OUTPUT_FILE', fullPage: true });
+  } else {
+    await page.screenshot({ path: '$OUTPUT_FILE', clip: { x: 0, y: 0, width: $VIEWPORT_WIDTH, height: $VIEWPORT_HEIGHT } });
+  }
+  console.log('Saved: $OUTPUT_FILE');
+} catch (e) {
+  console.error('Failed: ' + e.message);
+  process.exit(1);
+} finally {
+  await browser.close();
+}
+"
