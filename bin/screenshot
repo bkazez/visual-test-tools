@@ -11,6 +11,7 @@
 #   -e SELECTOR        CSS selector to clip to (e.g. ".common-searches")
 #   -f                 Full-page screenshot (no clip)
 #   -o FILE            Output file (default: /tmp/screenshot.png)
+#   -H "Name: Value"   Extra request header (repeatable)
 #
 # Examples:
 #   screenshot /                                             # mobile homepage
@@ -31,8 +32,9 @@ VIEWPORT_HEIGHT=812
 SELECTOR=""
 FULL_PAGE=false
 OUTPUT_FILE="/tmp/screenshot.png"
+HEADER_PAIRS=()
 
-while getopts "u:a:s:e:fo:" opt; do
+while getopts "u:a:s:e:fo:H:" opt; do
   case $opt in
     u) BASE_URL="$OPTARG" ;;
     a) IFS=':' read -r AUTH_USER AUTH_PASS <<< "$OPTARG" ;;
@@ -40,7 +42,8 @@ while getopts "u:a:s:e:fo:" opt; do
     e) SELECTOR="$OPTARG" ;;
     f) FULL_PAGE=true ;;
     o) OUTPUT_FILE="$OPTARG" ;;
-    *) echo "Usage: screenshot [-u URL] [-a user:pass] [-s WIDTHxHEIGHT] [-e selector] [-f] [-o file] /path" >&2; exit 1 ;;
+    H) HEADER_PAIRS+=("$OPTARG") ;;
+    *) echo "Usage: screenshot [-u URL] [-a user:pass] [-s WIDTHxHEIGHT] [-e selector] [-f] [-o file] [-H 'Name: Value'] /path" >&2; exit 1 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -69,6 +72,21 @@ if [ -n "$AUTH_USER" ]; then
   AUTH_JS="await page.authenticate({ username: '$AUTH_USER', password: '$AUTH_PASS' });"
 fi
 
+# Build extra-headers snippet from repeated -H "Name: Value" options
+HEADERS_JS=""
+if [ ${#HEADER_PAIRS[@]} -gt 0 ]; then
+  entries=""
+  for pair in "${HEADER_PAIRS[@]}"; do
+    name="${pair%%:*}"
+    value="${pair#*:}"
+    value="${value# }"
+    name=${name//\\/\\\\}; name=${name//\"/\\\"}
+    value=${value//\\/\\\\}; value=${value//\"/\\\"}
+    entries="$entries\"$name\": \"$value\", "
+  done
+  HEADERS_JS="await page.setExtraHTTPHeaders({ $entries });"
+fi
+
 cd "$TOOL_DIR"
 node --input-type=module -e "
 import puppeteer from 'puppeteer';
@@ -81,6 +99,7 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: $VIEWPORT_WIDTH, height: $VIEWPORT_HEIGHT });
   $AUTH_JS
+  $HEADERS_JS
   await page.goto('$BASE_URL$URL_PATH', { waitUntil: 'networkidle2', timeout: 15000 });
 
   const selector = '$SELECTOR';
@@ -107,5 +126,3 @@ try {
   await browser.close();
 }
 "
-
-open "$OUTPUT_FILE"
