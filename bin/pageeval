@@ -1,0 +1,96 @@
+#!/bin/bash
+# Evaluates a JavaScript expression in a page loaded in headless Chrome and
+# prints the JSON-serialized result. Use for measuring computed styles,
+# element geometry, or any DOM state a screenshot cannot show precisely.
+# Requires: npm install (puppeteer must be in package.json)
+#
+# Usage: pageeval [options] URL EXPRESSION
+#
+# Options:
+#   -s WIDTHxHEIGHT    Viewport size (default: 1440x900)
+#   -w SECONDS         Wait after load (default: 1)
+#   -a USER:PASS       HTTP basic auth (page.authenticate; covers subresources,
+#                      so module/JS fetches behind a basic-auth gate succeed,
+#                      unlike credentials embedded in the URL)
+#
+# Examples:
+#   pageeval http://localhost:8080/ 'document.title'
+#   pageeval http://localhost:8080/recipes/poke/ \
+#     '[...document.querySelectorAll(".rc-table td")].slice(0,4).map(td => td.getBoundingClientRect().width)'
+#   pageeval -s 375x812 http://localhost:8080/ 'getComputedStyle(document.querySelector("h1")).fontSize'
+
+set -e
+
+TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+VIEWPORT_WIDTH=1440
+VIEWPORT_HEIGHT=900
+WAIT_SECONDS=1
+AUTH=""
+
+while getopts "s:w:a:" opt; do
+  case $opt in
+    s) IFS='x' read -r VIEWPORT_WIDTH VIEWPORT_HEIGHT <<< "$OPTARG" ;;
+    w) WAIT_SECONDS="$OPTARG" ;;
+    a) AUTH="$OPTARG" ;;
+    *) echo "Usage: pageeval [-s WIDTHxHEIGHT] [-w seconds] [-a USER:PASS] URL EXPRESSION" >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+URL="$1"
+EXPRESSION="$2"
+if [ -z "$URL" ] || [ -z "$EXPRESSION" ]; then
+  echo "Usage: pageeval [-s WIDTHxHEIGHT] [-w seconds] URL EXPRESSION" >&2
+  exit 1
+fi
+
+# Auto-detect Chrome for Testing installed by puppeteer
+CHROME_DIR="$HOME/.cache/puppeteer/chrome"
+if [ -d "$CHROME_DIR" ]; then
+  CHROME_VERSION="$(ls "$CHROME_DIR" | sort -V | tail -1)"
+  if [ "$(uname -m)" = "arm64" ]; then
+    CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  else
+    CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  fi
+fi
+
+if [ ! -x "$CHROME_PATH" ]; then
+  echo "Chrome for Testing not found. Run: npx puppeteer browsers install chrome" >&2
+  exit 1
+fi
+
+export PAGEEVAL_URL="$URL"
+export PAGEEVAL_EXPRESSION="$EXPRESSION"
+export PAGEEVAL_WIDTH="$VIEWPORT_WIDTH"
+export PAGEEVAL_HEIGHT="$VIEWPORT_HEIGHT"
+export PAGEEVAL_WAIT="$WAIT_SECONDS"
+export PAGEEVAL_CHROME="$CHROME_PATH"
+export PAGEEVAL_AUTH="$AUTH"
+
+cd "$TOOL_DIR"
+node --input-type=module -e "
+import puppeteer from 'puppeteer';
+
+const browser = await puppeteer.launch({
+  headless: true,
+  executablePath: process.env.PAGEEVAL_CHROME,
+});
+try {
+  const page = await browser.newPage();
+  await page.setViewport({
+    width: Number(process.env.PAGEEVAL_WIDTH),
+    height: Number(process.env.PAGEEVAL_HEIGHT),
+  });
+  if (process.env.PAGEEVAL_AUTH) {
+    const [username, ...rest] = process.env.PAGEEVAL_AUTH.split(':');
+    await page.authenticate({ username, password: rest.join(':') });
+  }
+  await page.goto(process.env.PAGEEVAL_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+  await new Promise(r => setTimeout(r, Number(process.env.PAGEEVAL_WAIT) * 1000));
+  const result = await page.evaluate(process.env.PAGEEVAL_EXPRESSION);
+  console.log(JSON.stringify(result, null, 2));
+} finally {
+  await browser.close();
+}
+"
