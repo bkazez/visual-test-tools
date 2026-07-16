@@ -50,21 +50,9 @@ shift $((OPTIND - 1))
 
 URL_PATH="${1:-/}"
 
-# Auto-detect Chrome for Testing installed by puppeteer
-CHROME_DIR="$HOME/.cache/puppeteer/chrome"
-if [ -d "$CHROME_DIR" ]; then
-  CHROME_VERSION="$(ls "$CHROME_DIR" | sort -V | tail -1)"
-  if [ "$(uname -m)" = "arm64" ]; then
-    CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-  else
-    CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-  fi
-fi
-
-if [ ! -x "$CHROME_PATH" ]; then
-  echo "Chrome for Testing not found. Run: npx puppeteer browsers install chrome" >&2
-  exit 1
-fi
+# Resolve the headless browser (prefers chrome-headless-shell; see lib/chrome.sh)
+. "$TOOL_DIR/lib/chrome.sh"
+resolve_chrome || exit 1
 
 # Build auth snippet
 AUTH_JS=""
@@ -92,7 +80,7 @@ node --input-type=module -e "
 import puppeteer from 'puppeteer';
 
 const browser = await puppeteer.launch({
-  headless: true,
+  headless: $CHROME_HEADLESS_JS,
   executablePath: '$CHROME_PATH',
 });
 try {

@@ -1,0 +1,80 @@
+#!/bin/bash
+# Fetches a web page using a headless browser and extracts readable text content.
+# Useful for sites that block normal HTTP fetches (e.g. Amazon).
+# Requires: npm install (puppeteer must be in package.json)
+#
+# Usage: fetchhtml [options] URL
+#
+# Options:
+#   -s SELECTOR        CSS selector to extract from (default: body)
+#   -r                 Output raw HTML instead of text content
+#   -w SECONDS         Wait time after page load (default: 2)
+#
+# Examples:
+#   fetchhtml https://www.amazon.com/dp/B07C9GN2H5
+#   fetchhtml -s '#productTitle,.a-price' https://www.amazon.com/dp/B07C9GN2H5
+#   fetchhtml -r https://example.com
+
+set -e
+
+TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SELECTOR="body"
+RAW_HTML=false
+WAIT_SECONDS=2
+
+while getopts "s:rw:" opt; do
+  case $opt in
+    s) SELECTOR="$OPTARG" ;;
+    r) RAW_HTML=true ;;
+    w) WAIT_SECONDS="$OPTARG" ;;
+    *) echo "Usage: fetchhtml [-s selector] [-r] [-w seconds] URL" >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+TARGET_URL="${1:?URL required}"
+
+# Resolve the headless browser (prefers chrome-headless-shell; see lib/chrome.sh)
+. "$TOOL_DIR/lib/chrome.sh"
+resolve_chrome || exit 1
+
+cd "$TOOL_DIR"
+node --input-type=module -e "
+import puppeteer from 'puppeteer';
+
+const browser = await puppeteer.launch({
+  headless: $CHROME_HEADLESS_JS,
+  executablePath: $(printf '%s' "$CHROME_PATH" | node -e "process.stdout.write(JSON.stringify(require('fs').readFileSync('/dev/stdin','utf8')))"),
+});
+try {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1200, height: 900 });
+  await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+  await page.goto($(printf '%s' "$TARGET_URL" | node -e "process.stdout.write(JSON.stringify(require('fs').readFileSync('/dev/stdin','utf8')))"), { waitUntil: 'networkidle2', timeout: 30000 });
+  await new Promise(r => setTimeout(r, ${WAIT_SECONDS} * 1000));
+
+  const selector = $(printf '%s' "$SELECTOR" | node -e "process.stdout.write(JSON.stringify(require('fs').readFileSync('/dev/stdin','utf8')))");
+  const rawHtml = $RAW_HTML;
+
+  const elements = await page.\$\$(selector);
+  if (elements.length === 0) {
+    console.error('Selector not found: ' + selector);
+    process.exit(1);
+  }
+
+  for (const el of elements) {
+    if (rawHtml) {
+      const html = await el.evaluate(e => e.outerHTML);
+      console.log(html);
+    } else {
+      const text = await el.evaluate(e => e.innerText);
+      if (text.trim()) console.log(text.trim());
+    }
+  }
+} catch (e) {
+  console.error('Failed: ' + e.message);
+  process.exit(1);
+} finally {
+  await browser.close();
+}
+"

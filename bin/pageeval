@@ -44,21 +44,9 @@ if [ -z "$URL" ] || [ -z "$EXPRESSION" ]; then
   exit 1
 fi
 
-# Auto-detect Chrome for Testing installed by puppeteer
-CHROME_DIR="$HOME/.cache/puppeteer/chrome"
-if [ -d "$CHROME_DIR" ]; then
-  CHROME_VERSION="$(ls "$CHROME_DIR" | sort -V | tail -1)"
-  if [ "$(uname -m)" = "arm64" ]; then
-    CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-  else
-    CHROME_PATH="$CHROME_DIR/$CHROME_VERSION/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-  fi
-fi
-
-if [ ! -x "$CHROME_PATH" ]; then
-  echo "Chrome for Testing not found. Run: npx puppeteer browsers install chrome" >&2
-  exit 1
-fi
+# Resolve the headless browser (prefers chrome-headless-shell; see lib/chrome.sh)
+. "$TOOL_DIR/lib/chrome.sh"
+resolve_chrome || exit 1
 
 export PAGEEVAL_URL="$URL"
 export PAGEEVAL_EXPRESSION="$EXPRESSION"
@@ -66,6 +54,7 @@ export PAGEEVAL_WIDTH="$VIEWPORT_WIDTH"
 export PAGEEVAL_HEIGHT="$VIEWPORT_HEIGHT"
 export PAGEEVAL_WAIT="$WAIT_SECONDS"
 export PAGEEVAL_CHROME="$CHROME_PATH"
+export PAGEEVAL_HEADLESS="$CHROME_HEADLESS_MODE"
 export PAGEEVAL_AUTH="$AUTH"
 
 cd "$TOOL_DIR"
@@ -73,7 +62,7 @@ node --input-type=module -e "
 import puppeteer from 'puppeteer';
 
 const browser = await puppeteer.launch({
-  headless: true,
+  headless: process.env.PAGEEVAL_HEADLESS === 'shell' ? 'shell' : true,
   executablePath: process.env.PAGEEVAL_CHROME,
 });
 try {
