@@ -94,7 +94,8 @@ try {
   const fullPage = $FULL_PAGE;
 
   if (selector) {
-    const el = await page.\$(selector);
+    // Wait for the selector: client-rendered content often lands after networkidle2.
+    const el = await page.waitForSelector(selector, { timeout: 15000 }).catch(() => null);
     if (!el) {
       console.error('Selector not found: ' + selector);
       process.exit(1);
