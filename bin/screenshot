@@ -88,7 +88,14 @@ try {
   await page.setViewport({ width: $VIEWPORT_WIDTH, height: $VIEWPORT_HEIGHT });
   $AUTH_JS
   $HEADERS_JS
-  await page.goto('$BASE_URL$URL_PATH', { waitUntil: 'networkidle2', timeout: 15000 });
+  // networkidle2 gives fully-loaded pages, but map/streaming pages fetch tiles forever and
+  // never go idle -- fall back to a rendered-but-busy page instead of failing outright.
+  await page.goto('$BASE_URL$URL_PATH', { waitUntil: 'networkidle2', timeout: 15000 })
+    .catch(async (e) => {
+      if (!/timeout/i.test(e.message)) throw e;
+      console.error('Note: page never went network-idle (tiles/streams?); capturing anyway.');
+      await new Promise((r) => setTimeout(r, 2000)); // let in-flight paints land
+    });
 
   const selector = '$SELECTOR';
   const fullPage = $FULL_PAGE;
