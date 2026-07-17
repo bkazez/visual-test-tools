@@ -12,6 +12,9 @@
 #   -a USER:PASS       HTTP basic auth (page.authenticate; covers subresources,
 #                      so module/JS fetches behind a basic-auth gate succeed,
 #                      unlike credentials embedded in the URL)
+#   -t                 Emulate a touch device (hasTouch + mobile viewport flags +
+#                      an iPhone user agent), so pages that branch on
+#                      'ontouchstart'/maxTouchPoints take their mobile path
 #
 # Examples:
 #   pageeval http://localhost:8080/ 'document.title'
@@ -26,13 +29,15 @@ VIEWPORT_WIDTH=1440
 VIEWPORT_HEIGHT=900
 WAIT_SECONDS=1
 AUTH=""
+TOUCH=""
 
-while getopts "s:w:a:" opt; do
+while getopts "s:w:a:t" opt; do
   case $opt in
     s) IFS='x' read -r VIEWPORT_WIDTH VIEWPORT_HEIGHT <<< "$OPTARG" ;;
     w) WAIT_SECONDS="$OPTARG" ;;
     a) AUTH="$OPTARG" ;;
-    *) echo "Usage: pageeval [-s WIDTHxHEIGHT] [-w seconds] [-a USER:PASS] URL EXPRESSION" >&2; exit 1 ;;
+    t) TOUCH=1 ;;
+    *) echo "Usage: pageeval [-s WIDTHxHEIGHT] [-w seconds] [-a USER:PASS] [-t] URL EXPRESSION" >&2; exit 1 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -56,6 +61,7 @@ export PAGEEVAL_WAIT="$WAIT_SECONDS"
 export PAGEEVAL_CHROME="$CHROME_PATH"
 export PAGEEVAL_HEADLESS="$CHROME_HEADLESS_MODE"
 export PAGEEVAL_AUTH="$AUTH"
+export PAGEEVAL_TOUCH="$TOUCH"
 
 cd "$TOOL_DIR"
 node --input-type=module -e "
@@ -67,10 +73,17 @@ const browser = await puppeteer.launch({
 });
 try {
   const page = await browser.newPage();
+  const touch = !!process.env.PAGEEVAL_TOUCH;
   await page.setViewport({
     width: Number(process.env.PAGEEVAL_WIDTH),
     height: Number(process.env.PAGEEVAL_HEIGHT),
+    hasTouch: touch,
+    isMobile: touch,
+    deviceScaleFactor: touch ? 2 : 1,
   });
+  if (touch) {
+    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1');
+  }
   if (process.env.PAGEEVAL_AUTH) {
     const [username, ...rest] = process.env.PAGEEVAL_AUTH.split(':');
     await page.authenticate({ username, password: rest.join(':') });
