@@ -1,10 +1,17 @@
 # Shared headless-Chrome resolution for the bin/ tools. Source this, then call resolve_chrome.
 #
-# Prefers chrome-headless-shell over full Chrome for Testing: full Chrome's "new" headless
-# mode initializes the macOS keychain and the GPU compositor, and BOTH hang in a GUI-less
-# context (ssh session to a headless/locked Mac) -- Page.captureScreenshot times out even on
-# a trivial static page. chrome-headless-shell (the classic headless implementation) depends
-# on neither and captures reliably everywhere. Diagnosed 2026-07-15 on homebase over ssh.
+# Prefers chrome-headless-shell over full Chrome for Testing. On macOS 26, full Chrome's
+# "new" headless mode stops producing frames on some builds: everything that needs one --
+# Page.captureScreenshot, clicking an element, elementHandle.evaluate -- times out even on a
+# trivial static page, while a plain page.evaluate keeps working, so the failure reads as a
+# bug in the page under test.
+#
+# Cause unknown. Chrome version is the only discriminator found: 148 hangs 3/3 and 150
+# succeeds 3/3 under identical conditions (measured 2026-08-06). An earlier note here blamed
+# the macOS keychain and GPU compositor being unavailable in a GUI-less ssh context; that is
+# wrong, since the machine had a logged-in console session throughout and a newer Chrome
+# works there anyway. chrome-headless-shell has never shown the hang on any version, which
+# is why it is preferred; upgrading past Chrome 148 also avoids it.
 #
 # Sets:
 #   CHROME_PATH          binary to pass as puppeteer executablePath
