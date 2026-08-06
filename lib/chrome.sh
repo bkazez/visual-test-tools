@@ -26,8 +26,11 @@ resolve_chrome() {
   CHROME_HEADLESS_MODE="full"
   CHROME_HEADLESS_JS="true"
 
+  # grep '^mac': the cache holds the downloaded .zip beside the unpacked build
+  # directory, and an unfiltered `ls | tail -1` can select the archive, which
+  # yields a nonsense path and the misleading "not found" error below.
   if [ -d "$shell_dir" ]; then
-    v="$(ls "$shell_dir" | sort -V | tail -1)"
+    v="$(ls "$shell_dir" | grep '^mac' | sort -V | tail -1)"
     CHROME_PATH="$shell_dir/$v/chrome-headless-shell-$arch/chrome-headless-shell"
     CHROME_HEADLESS_MODE="shell"
     CHROME_HEADLESS_JS="'shell'"
@@ -35,7 +38,7 @@ resolve_chrome() {
 
   # Fall back to full Chrome for Testing if the shell binary is not installed.
   if [ ! -x "$CHROME_PATH" ] && [ -d "$chrome_dir" ]; then
-    v="$(ls "$chrome_dir" | sort -V | tail -1)"
+    v="$(ls "$chrome_dir" | grep '^mac' | sort -V | tail -1)"
     CHROME_PATH="$chrome_dir/$v/chrome-$arch/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
     CHROME_HEADLESS_MODE="full"
     CHROME_HEADLESS_JS="true"
