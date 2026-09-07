@@ -1,0 +1,50 @@
+#!/bin/bash
+# Reads Amazon search results, product pages and reviews through headless Chrome.
+#
+# WebFetch cannot read Amazon at all (HTTP 500), and fetchhtml sees only the logged-out
+# international page: US dollars and a delivery date a week out, whatever the store. Set a
+# postcode with -d and the prices come back in local currency with the real "fastest
+# delivery" date -- which is the only way to answer "can this arrive by Tuesday".
+#
+# Usage:
+#   amazon [-D domain] [-d postcode] [-c currency] search "query" ["query" ...]
+#   amazon [-D domain] [-d postcode] [-c currency] product ASIN [ASIN ...]
+#   amazon [-D domain] [-d postcode] [-c currency] reviews ASIN [ASIN ...]
+#
+# Examples:
+#   amazon -d "W1D 3QF" -c GBP search "fit over blue light glasses"
+#   amazon -d 94704 -D www.amazon.com -c USD product B091BH3FCX
+#   amazon -d "W1D 3QF" reviews B091BH3FCX          # incl. the critical ones
+#
+# Output is one JSON object per line for search, one pretty object per product/reviews.
+
+set -e
+
+TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export AMZ_DOMAIN="www.amazon.co.uk"
+export AMZ_POSTCODE=""
+export AMZ_CURRENCY=""
+
+while getopts "D:d:c:" opt; do
+  case $opt in
+    D) AMZ_DOMAIN="$OPTARG" ;;
+    d) AMZ_POSTCODE="$OPTARG" ;;
+    c) AMZ_CURRENCY="$OPTARG" ;;
+    *) sed -n '3,20p' "$0" >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -ge 2 ] || { sed -n '8,17p' "$0" >&2; exit 1; }
+
+case "$AMZ_DOMAIN" in
+  *.co.uk|*.de|*.fr|*.it|*.es|*.nl|*.se|*.pl) export AMZ_LOCALE="en-GB,en;q=0.9" ;;
+  *) export AMZ_LOCALE="en-US,en;q=0.9" ;;
+esac
+
+# Resolve the headless browser (prefers chrome-headless-shell; see lib/chrome.sh)
+. "$TOOL_DIR/lib/chrome.sh"
+resolve_chrome || exit 1
+export CHROME_PATH CHROME_HEADLESS_MODE
+
+cd "$TOOL_DIR"
+exec node lib/amazon.mjs "$@"
