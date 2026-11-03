@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Record one UI test running on a real iPhone, as a video file: the screen
+# recording App Review asks for, made without anybody holding the phone.
+#
+#   device-demo PROJECT SCHEME TEST OUT.mp4
+#   device-demo ios/App.xcodeproj App AppUITests/AppReviewDemoTests demo.mp4
+#
+# The phone is the first available one `xcrun devicectl` lists (DEVICE=<udid>
+# picks another); it must be paired with Developer Mode on. SIMULATOR=1 runs
+# on the newest iPhone simulator instead, to check a test before it touches
+# the phone. The recording comes from Xcode's own UI-test screen capture,
+# switched on in the .xctestrun, so the project needs no test plan for it.
+set -euo pipefail
+
+[ $# -eq 4 ] || { sed -n '2,13p' "$0" >&2; exit 2; }
+project="$1"; scheme="$2"; test_id="$3"; out="$4"
+
+if [ "${SIMULATOR:-}" = 1 ]; then
+  sim="$(xcrun simctl list devices available | sed -n 's/^ *\(iPhone [^(]*\) (.*/\1/p' | tail -1 | sed 's/ *$//')"
+  dest="platform=iOS Simulator,name=$sim,OS=latest"
+else
+  # devicectl's hostname column is the hardware UDID xcodebuild wants.
+  udid="${DEVICE:-$(xcrun devicectl list devices 2>/dev/null | grep 'available (paired)' | grep -o '[0-9A-F]\{8\}-[0-9A-F]\{16\}\.coredevice' | head -1 | sed 's/\.coredevice$//')}"
+  [ -n "$udid" ] || { echo "device-demo: no paired iPhone is available; plug one in and unlock it" >&2; exit 1; }
+  dest="id=$udid"
+fi
+
+work="$(mktemp -d -t device-demo)"
+xcodebuild build-for-testing -project "$project" -scheme "$scheme" -destination "$dest" \
+  -derivedDataPath "$work/derived" -allowProvisioningUpdates -quiet
+
+run="$(find "$work/derived/Build/Products" -name '*.xctestrun' | head -1)"
+python3 -I - "$run" "$test_id" <<'EOF'
+import plistlib, sys
+path, test_id = sys.argv[1], sys.argv[2]
+with open(path, "rb") as f:
+    run = plistlib.load(f)
+target = test_id.split("/")[0]
+def configure(t):
+    t["OnlyTestIdentifiers"] = ["/".join(test_id.split("/")[1:])]
+    t["PreferredScreenCaptureFormat"] = "screenRecording"
+    t["SystemAttachmentLifetime"] = "keepAlways"
+if "TestConfigurations" in run:  # format version 2
+    for config in run["TestConfigurations"]:
+        config["TestTargets"] = [t for t in config["TestTargets"] if t["BlueprintName"] == target]
+        for t in config["TestTargets"]:
+            configure(t)
+else:                            # format version 1: one key per test target
+    for name in [k for k in run if not k.startswith("__")]:
+        if name == target:
+            configure(run[name])
+        else:
+            del run[name]
+with open(path, "wb") as f:
+    plistlib.dump(run, f)
+EOF
+
+xcodebuild test-without-building -xctestrun "$run" -destination "$dest" \
+  -resultBundlePath "$work/result.xcresult" -quiet
+
+xcrun xcresulttool export attachments --path "$work/result.xcresult" --output-path "$work/attachments" >/dev/null
+video="$(find "$work/attachments" -name '*.mp4' -o -name '*.mov' | head -1)"
+[ -n "$video" ] || { echo "device-demo: the test passed but recorded no video ($work)" >&2; exit 1; }
+mkdir -p "$(dirname "$out")"
+cp "$video" "$out"
+seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")"
+echo "$out ($seconds s)"
