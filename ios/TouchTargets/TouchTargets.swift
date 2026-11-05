@@ -63,10 +63,16 @@ public enum TouchTargets {
         var rows: [Int: CGRect] = [:]
         collect(root, path: [], screen: root.frame, into: &targets, counts: &counts, rows: &rows)
         // The keyboard is Apple's, and its keys are not all inside the
-        // keyboard element: the dictation and globe keys sit under it.
+        // keyboard element: the dictation and globe keys sit under it, and on
+        // iPad the Undo / Redo / Paste bar sits above it, in the keyboard's
+        // own window.
         if let keyboardTop = keyboardTop(root) {
             targets.removeAll { $0.frame.maxY > keyboardTop }
         }
+        let keyboardWindows = Set(root.children.enumerated().compactMap { index, window in
+            keyboardTop(window) == nil ? nil : index
+        })
+        targets.removeAll { $0.window.map(keyboardWindows.contains) ?? false }
         let perRow = Dictionary(grouping: targets.compactMap(\.row), by: { $0 }).mapValues(\.count)
         // Rounding in layout reports a 44 pt row as 43.99.
         let tolerance: CGFloat = 0.5
@@ -160,6 +166,8 @@ public enum TouchTargets {
         let inList: Bool
         /// The list row this sits in, if any.
         let row: Int?
+        /// Which of the application's windows this is in.
+        let window: Int?
         let ancestors: Set<Int>
 
         func comparable(with other: Target) -> Bool {
@@ -174,7 +182,7 @@ public enum TouchTargets {
     private nonisolated(unsafe) static var serial = 0
 
     private static func collect(
-        _ node: XCUIElementSnapshot, path: [Ancestor], screen: CGRect,
+        _ node: XCUIElementSnapshot, path: [Ancestor], screen: CGRect, windowIndex: Int? = nil,
         into targets: inout [Target], counts: inout [XCUIElement.ElementType: Int],
         rows: inout [Int: CGRect]
     ) {
@@ -198,13 +206,15 @@ public enum TouchTargets {
                     scroll: path.last { scrollTypes.contains($0.type) }?.serial,
                     inList: path.last { scrollTypes.contains($0.type) }.map { [.table, .collectionView].contains($0.type) } ?? false,
                     row: path.last { $0.type == .cell }?.serial,
+                    window: windowIndex,
                     ancestors: Set(path.map(\.serial))
                 ))
             }
         }
         let below = path + [Ancestor(type: type, serial: mine)]
-        for child in node.children {
-            collect(child, path: below, screen: screen, into: &targets, counts: &counts, rows: &rows)
+        for (index, child) in node.children.enumerated() {
+            collect(child, path: below, screen: screen, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
+                    into: &targets, counts: &counts, rows: &rows)
         }
     }
 
