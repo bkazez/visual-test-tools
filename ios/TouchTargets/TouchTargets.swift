@@ -14,7 +14,7 @@
 //      several controls has each measured as itself. A row with no control in
 //      it is text, not a target. Controls Apple draws itself
 //      -- navigation bar, tab bar, toolbar, keyboard, segmented control,
-//      alerts -- are left alone: their hit areas extend past what the
+//      alerts, and the text and context menus with their page arrows -- are left alone: their hit areas extend past what the
 //      accessibility frame reports. So is a text field's size: a field that
 //      grows with its text reports the text's height, not the box drawn
 //      around it, so make the whole box focus the field instead (a tap
@@ -211,11 +211,18 @@ public enum TouchTargets {
                 ))
             }
         }
-        let below = path + [Ancestor(type: type, serial: mine)]
+        // iOS presents its text and context menus in a window of their own,
+        // reporting the items as menu items with no menu around them.
+        let kind = type == .window && holdsMenuItem(node) ? .menu : type
+        let below = path + [Ancestor(type: kind, serial: mine)]
         for (index, child) in node.children.enumerated() {
             collect(child, path: below, screen: screen, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
                     into: &targets, counts: &counts, rows: &rows)
         }
+    }
+
+    private static func holdsMenuItem(_ node: XCUIElementSnapshot) -> Bool {
+        node.elementType == .menuItem || node.children.contains(where: holdsMenuItem)
     }
 
     private static func keyboardTop(_ node: XCUIElementSnapshot) -> CGFloat? {
