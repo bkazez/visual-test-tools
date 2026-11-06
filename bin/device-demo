@@ -5,8 +5,8 @@
 #   device-demo PROJECT SCHEME TEST OUT.mp4
 #   device-demo ios/App.xcodeproj App AppUITests/AppReviewDemoTests demo.mp4
 #
-# The phone is the first available one `xcrun devicectl` lists (DEVICE=<udid>
-# picks another); it must be paired with Developer Mode on. SIMULATOR=1 runs
+# The phone is the one `iphone` (bkazez/bin) holds for the run, so two sessions
+# never drive it at once; `iphone status` says what it needs. SIMULATOR=1 runs
 # on the newest iPhone simulator instead, to check a test before it touches
 # the phone. The recording comes from Xcode's own UI-test screen capture,
 # switched on in the .xctestrun, so the project needs no test plan for it.
@@ -19,10 +19,8 @@ if [ "${SIMULATOR:-}" = 1 ]; then
   sim="$(xcrun simctl list devices available | sed -n 's/^ *\(iPhone [^(]*\) (.*/\1/p' | tail -1 | sed 's/ *$//')"
   dest="platform=iOS Simulator,name=$sim,OS=latest"
 else
-  # devicectl's hostname column is the hardware UDID xcodebuild wants.
-  udid="${DEVICE:-$(xcrun devicectl list devices 2>/dev/null | grep 'available (paired)' | grep -o '[0-9A-F]\{8\}-[0-9A-F]\{16\}\.coredevice' | head -1 | sed 's/\.coredevice$//')}"
-  [ -n "$udid" ] || { echo "device-demo: no paired iPhone is available; plug one in and unlock it" >&2; exit 1; }
-  dest="id=$udid"
+  [ -n "${IPHONE_HELD:-}" ] || exec iphone run "$0" "$@"
+  dest="id=$DEVICE"
 fi
 
 work="$(mktemp -d -t device-demo)"
