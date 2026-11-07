@@ -18,14 +18,16 @@ project="$1"; scheme="$2"; test_id="$3"; out="$4"
 if [ "${SIMULATOR:-}" = 1 ]; then
   sim="$(xcrun simctl list devices available | sed -n 's/^ *\(iPhone [^(]*\) (.*/\1/p' | tail -1 | sed 's/ *$//')"
   dest="platform=iOS Simulator,name=$sim,OS=latest"
+  xcodebuild=(xcodebuild)
 else
   [ -n "${IPHONE_HELD:-}" ] || exec iphone run "$0" "$@"
   dest="id=$DEVICE"
+  xcodebuild=(iphone xcodebuild)
 fi
 
 work="$(mktemp -d -t device-demo)"
-xcodebuild build-for-testing -project "$project" -scheme "$scheme" -destination "$dest" \
-  -derivedDataPath "$work/derived" -allowProvisioningUpdates -quiet
+"${xcodebuild[@]}" build-for-testing -project "$project" -scheme "$scheme" -destination "$dest" \
+  -derivedDataPath "$work/derived" -quiet
 
 run="$(find "$work/derived/Build/Products" -name '*.xctestrun' | head -1)"
 python3 -I - "$run" "$test_id" <<'EOF'
@@ -53,7 +55,7 @@ with open(path, "wb") as f:
     plistlib.dump(run, f)
 EOF
 
-xcodebuild test-without-building -xctestrun "$run" -destination "$dest" \
+"${xcodebuild[@]}" test-without-building -xctestrun "$run" -destination "$dest" \
   -resultBundlePath "$work/result.xcresult" -quiet
 
 xcrun xcresulttool export attachments --path "$work/result.xcresult" --output-path "$work/attachments" >/dev/null
