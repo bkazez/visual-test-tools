@@ -14,7 +14,8 @@
 //      several controls has each measured as itself. A row with no control in
 //      it is text, not a target. Controls Apple draws itself
 //      -- navigation bar, tab bar, toolbar, keyboard, segmented control,
-//      alerts, and the text and context menus with their page arrows -- are left alone: their hit areas extend past what the
+//      alerts, a map's own Legal link and compass, and the text and context
+//      menus with their page arrows -- are left alone: their hit areas extend past what the
 //      accessibility frame reports. So is a text field's size: a field that
 //      grows with its text reports the text's height, not the box drawn
 //      around it, so make the whole box focus the field instead (a tap
@@ -140,7 +141,7 @@ public enum TouchTargets {
     /// Apple's own containers: their layout is the system's, not the app's.
     private static let systemTypes: Set<XCUIElement.ElementType> = [
         .navigationBar, .tabBar, .toolbar, .keyboard, .segmentedControl,
-        .alert, .sheet, .picker, .datePicker, .menu, .menuBar, .statusBar,
+        .alert, .sheet, .picker, .datePicker, .menu, .menuBar, .statusBar, .map,
     ]
 
     private static let scrollTypes: Set<XCUIElement.ElementType> = [
@@ -212,13 +213,19 @@ public enum TouchTargets {
             }
         }
         // iOS presents its text and context menus in a window of their own,
-        // reporting the items as menu items with no menu around them.
-        let kind = type == .window && holdsMenuItem(node) ? .menu : type
+        // reporting the items as menu items with no menu around them. MapKit
+        // puts its Legal link beside the map, in a view the map's own size.
+        let kind: XCUIElement.ElementType = type == .window && holdsMenuItem(node) ? .menu
+            : wrapsMap(node, frame: node.frame) ? .map : type
         let below = path + [Ancestor(type: kind, serial: mine)]
         for (index, child) in node.children.enumerated() {
             collect(child, path: below, screen: screen, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
                     into: &targets, counts: &counts, rows: &rows)
         }
+    }
+
+    private static func wrapsMap(_ node: XCUIElementSnapshot, frame: CGRect) -> Bool {
+        node.children.contains { $0.frame == frame && ($0.elementType == .map || wrapsMap($0, frame: frame)) }
     }
 
     private static func holdsMenuItem(_ node: XCUIElementSnapshot) -> Bool {
