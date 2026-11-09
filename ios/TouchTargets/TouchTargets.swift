@@ -25,7 +25,8 @@
 //   2. GAP. Two targets are at least `minGap` (16 pt) apart, edge to edge,
 //      when the distance between them is a layout decision: both fixed on the
 //      screen (a key above a tab bar), both in the same scrolling content, or
-//      both in the same row of a list. Rows of a list abut by design, and the
+//      both in the same row of a list (a table or collection view, or a scroll
+//      view named in `rules.lists`). Rows of a list abut by design, and the
 //      swipe buttons iOS slides out beside a row are iOS's, so targets in two
 //      different rows, or outside any row, of one list are not compared. A row
 //      scrolled half under a bar is not a layout decision either, so a target
@@ -44,10 +45,13 @@ public struct TouchTargetRules: Sendable {
     public var minSize: CGFloat
     /// The smallest edge-to-edge distance between two targets, in points.
     public var minGap: CGFloat
+    /// Accessibility identifiers of scroll views whose rows are a list drawn without a table or collection view.
+    public var lists: Set<String>
 
-    public init(minSize: CGFloat = 44, minGap: CGFloat = 16) {
+    public init(minSize: CGFloat = 44, minGap: CGFloat = 16, lists: Set<String> = []) {
         self.minSize = minSize
         self.minGap = minGap
+        self.lists = lists
     }
 }
 
@@ -62,7 +66,7 @@ public enum TouchTargets {
         var targets: [Target] = []
         var counts: [XCUIElement.ElementType: Int] = [:]
         var rows: [Int: CGRect] = [:]
-        collect(root, path: [], screen: root.frame, into: &targets, counts: &counts, rows: &rows)
+        collect(root, path: [], screen: root.frame, lists: rules.lists, into: &targets, counts: &counts, rows: &rows)
         // The keyboard is Apple's, and its keys are not all inside the
         // keyboard element: the dictation and globe keys sit under it, and on
         // iPad the Undo / Redo / Paste bar sits above it, in the keyboard's
@@ -183,7 +187,7 @@ public enum TouchTargets {
     private nonisolated(unsafe) static var serial = 0
 
     private static func collect(
-        _ node: XCUIElementSnapshot, path: [Ancestor], screen: CGRect, windowIndex: Int? = nil,
+        _ node: XCUIElementSnapshot, path: [Ancestor], screen: CGRect, lists: Set<String>, windowIndex: Int? = nil,
         into targets: inout [Target], counts: inout [XCUIElement.ElementType: Int],
         rows: inout [Int: CGRect]
     ) {
@@ -214,18 +218,19 @@ public enum TouchTargets {
         }
         // iOS presents its text and context menus in a window of their own,
         // reporting the items as menu items with no menu around them. MapKit
-        // puts its Legal link beside the map, in a view the map's own size.
+        // puts its Legal link beside the map, in a view no larger than the map.
         let kind: XCUIElement.ElementType = type == .window && holdsMenuItem(node) ? .menu
-            : wrapsMap(node, frame: node.frame) ? .map : type
+            : wrapsMap(node) ? .map
+            : type == .scrollView && lists.contains(node.identifier) ? .collectionView : type
         let below = path + [Ancestor(type: kind, serial: mine)]
         for (index, child) in node.children.enumerated() {
-            collect(child, path: below, screen: screen, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
+            collect(child, path: below, screen: screen, lists: lists, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
                     into: &targets, counts: &counts, rows: &rows)
         }
     }
 
-    private static func wrapsMap(_ node: XCUIElementSnapshot, frame: CGRect) -> Bool {
-        node.children.contains { $0.frame == frame && ($0.elementType == .map || wrapsMap($0, frame: frame)) }
+    private static func wrapsMap(_ node: XCUIElementSnapshot) -> Bool {
+        node.children.contains { $0.frame.contains(node.frame) && ($0.elementType == .map || wrapsMap($0)) }
     }
 
     private static func holdsMenuItem(_ node: XCUIElementSnapshot) -> Bool {
