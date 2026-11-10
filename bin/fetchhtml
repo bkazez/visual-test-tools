@@ -2,7 +2,9 @@
 # Fetches a web page in a stealth browser and extracts readable text content: a visible
 # Chrome for Testing window, the puppeteer-extra stealth plugin, and a profile kept in
 # ~/.cache/fetchhtml-profile, for sites that refuse automated browsers (Amazon, airlines).
-# Needs a logged-in GUI session. Requires: npm install
+# The visible window opens on homebase, never on the machine you are using: elsewhere the
+# script re-runs itself there over ssh. If homebase is unreachable it runs here in
+# chrome-headless-shell, which some of those sites refuse. Requires: npm install
 #
 # Usage: fetchhtml [options] URL
 #
@@ -35,6 +37,17 @@ shift $((OPTIND - 1))
 
 TARGET_URL="${1:?URL required}"
 
+HEADLESS=false
+if [ "$(hostname -s)" != homebase ]; then
+  set +e
+  ssh -o BatchMode=yes -o ConnectTimeout=5 homebase "~/bin/fetchhtml $(printf '%q ' -s "$SELECTOR" -w "$WAIT_SECONDS" $($RAW_HTML && echo -r) "$TARGET_URL")"
+  status=$?
+  set -e
+  [ "$status" -ne 255 ] && exit "$status"
+  echo "fetchhtml: homebase unreachable, fetching here headless" >&2
+  HEADLESS="'shell'"
+fi
+
 cd "$TOOL_DIR"
 node --input-type=module -e "
 import puppeteer from 'puppeteer-extra';
@@ -42,7 +55,7 @@ import Stealth from 'puppeteer-extra-plugin-stealth';
 puppeteer.use(Stealth());
 
 const browser = await puppeteer.launch({
-  headless: false,
+  headless: ${HEADLESS},
   userDataDir: process.env.HOME + '/.cache/fetchhtml-profile',
   args: ['--window-size=1400,1000'],
 });
