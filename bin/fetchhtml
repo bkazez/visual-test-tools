@@ -18,7 +18,7 @@
 
 set -e
 
-TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TOOL_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 SELECTOR="body"
 RAW_HTML=false
 WAIT_SECONDS=2
