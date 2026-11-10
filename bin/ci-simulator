@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Print the UDID of the simulator a CI job runs on, creating it the first time.
+
+    ci-simulator NAME BUNDLE_ID...
+    ci-simulator legato-ci com.impulsearc.Legato
+
+In a workflow, through the action beside this repo's bin/:
+
+    - id: sim
+      uses: bkazez/visual-test-tools/ios-simulator@main
+      with: { name: legato-ci, bundles: com.impulsearc.Legato }
+    - run: xcodebuild test ... -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+
+CI owns its device by name, never "the newest iPhone" a person at the machine also
+picks: an app left open on a shared device answers the next launch with
+`Application failed preflight checks`, which reads as a signing or code failure.
+
+The device lives on the newest iOS runtime that runs a plain iPhone. A runtime
+made for one model (iOS-27-2-iPhone19-4 runs only the iPhone Duo) is skipped.
+After an Xcode upgrade the device on the old runtime no longer launches tests,
+so it is deleted and made again on the new one. Before printing, it boots the
+device and uninstalls the bundles the last run left there.
+"""
+import json, re, subprocess, sys
+
+BOOT_TIMEOUT_SECONDS = 300
+
+if len(sys.argv) < 3:
+    sys.exit(__doc__)
+name, bundles = sys.argv[1], sys.argv[2:]
+
+sh = lambda *a: subprocess.run(a, capture_output=True, text=True, check=True).stdout
+simctl = lambda *a, **kw: subprocess.run(('xcrun', 'simctl') + a, capture_output=True, text=True, **kw)
+ver = lambda s: tuple(int(n) for n in re.findall(r'\d+', s))
+plain = lambda t: re.fullmatch(r'iPhone \d+', t['name'])
+
+runtimes = [r for r in json.loads(sh('xcrun', 'simctl', 'list', 'runtimes', '-j'))['runtimes']
+            if r['isAvailable'] and 'iOS' in r['name'] and any(plain(t) for t in r.get('supportedDeviceTypes') or [])]
+if not runtimes:
+    sys.exit('no iOS simulator runtime that runs a plain iPhone')
+runtime = max(runtimes, key=lambda r: ver(r['version']))
+
+udid = None
+for key, entries in json.loads(sh('xcrun', 'simctl', 'list', 'devices', '-j'))['devices'].items():
+    for d in entries:
+        if d['name'] != name:
+            continue
+        if key == runtime['identifier'] and d.get('isAvailable') and not udid:
+            udid = d['udid']
+        else:
+            simctl('delete', d['udid'])
+            print(f'deleted {name} on {key}', file=sys.stderr)
+
+if not udid:
+    device = max(filter(plain, runtime['supportedDeviceTypes']), key=lambda t: ver(t['name']))
+    udid = sh('xcrun', 'simctl', 'create', name, device['identifier'], runtime['identifier']).strip()
+    print(f"created {name} as {device['name']} on {runtime['name']}", file=sys.stderr)
+
+
+def boots_in_time():
+    simctl('boot', udid)
+    try:
+        simctl('bootstatus', udid, timeout=BOOT_TIMEOUT_SECONDS)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
+# `simctl bootstatus` can wait forever on a loaded machine, and the job then sits silent until its own timeout.
+if not boots_in_time():
+    print(f'{name} did not boot in {BOOT_TIMEOUT_SECONDS}s; restarting it', file=sys.stderr)
+    simctl('shutdown', udid)
+    if not boots_in_time():
+        sys.exit(f'{name} did not boot in {BOOT_TIMEOUT_SECONDS}s, twice; the machine is probably overloaded')
+
+for bundle in bundles:
+    simctl('uninstall', udid, bundle)
+
+print(udid)

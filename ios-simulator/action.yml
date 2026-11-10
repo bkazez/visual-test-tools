@@ -1,0 +1,24 @@
+name: iOS simulator
+description: The simulator a CI job owns by name, booted and cleared of the last run's installs (bin/ci-simulator).
+inputs:
+  name:
+    description: The device's name, one per app, e.g. legato-ci
+    required: true
+  bundles:
+    description: Space-separated bundle ids to uninstall before the run
+    required: true
+outputs:
+  udid:
+    description: The device's UDID
+    value: ${{ steps.pick.outputs.udid }}
+runs:
+  using: composite
+  steps:
+    - id: pick
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        BUNDLES: ${{ inputs.bundles }}
+      run: |
+        udid="$(python3 -I "$GITHUB_ACTION_PATH/../bin/ci-simulator" "$NAME" $BUNDLES)"
+        echo "udid=$udid" >> "$GITHUB_OUTPUT"
