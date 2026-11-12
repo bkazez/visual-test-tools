@@ -230,7 +230,7 @@ public enum TouchTargets {
     }
 
     private static func wrapsMap(_ node: XCUIElementSnapshot) -> Bool {
-        node.children.contains { $0.frame.contains(node.frame) && ($0.elementType == .map || wrapsMap($0)) }
+        node.children.contains { $0.frame.insetBy(dx: -0.5, dy: -0.5).contains(node.frame) && ($0.elementType == .map || wrapsMap($0)) }
     }
 
     private static func holdsMenuItem(_ node: XCUIElementSnapshot) -> Bool {
