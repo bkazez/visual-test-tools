@@ -85,7 +85,7 @@ public enum TouchTargets {
         var problems: [(severity: CGFloat, problem: TouchTargetProblem, targets: [Target])] = []
 
         var measured = Set<String>()
-        for target in targets where target.system == nil && !textTypes.contains(target.type) {
+        for target in targets where target.systems.isEmpty && !textTypes.contains(target.type) {
             guard measured.insert("\(target.frame)").inserted else { continue }
             let alone = target.row.map { perRow[$0] == 1 } ?? false
             let area = alone ? (target.row.flatMap { rows[$0] } ?? target.frame) : target.frame
@@ -163,8 +163,9 @@ public enum TouchTargets {
         let indexAmongType: Int
         let frame: CGRect
         let name: String
-        /// The nearest of Apple's own containers, if any.
-        let system: Int?
+        /// Every one of Apple's own containers this sits in; MapKit nests
+        /// its annotations in two.
+        let systems: Set<Int>
         /// The nearest scrolling container, if any.
         let scroll: Int?
         /// Whether that container is a list (table or collection view).
@@ -177,7 +178,7 @@ public enum TouchTargets {
 
         func comparable(with other: Target) -> Bool {
             if ancestors.contains(other.serial) || other.ancestors.contains(serial) { return false }
-            if let system, system == other.system { return false }
+            if !systems.isDisjoint(with: other.systems) { return false }
             guard scroll == other.scroll else { return false }
             if inList { return row != nil && row == other.row }
             return true
@@ -207,7 +208,7 @@ public enum TouchTargets {
                     indexAmongType: index,
                     frame: frame,
                     name: describe(node),
-                    system: path.last { systemTypes.contains($0.type) }?.serial,
+                    systems: Set(path.filter { systemTypes.contains($0.type) }.map(\.serial)),
                     scroll: path.last { scrollTypes.contains($0.type) }?.serial,
                     inList: path.last { scrollTypes.contains($0.type) }.map { [.table, .collectionView].contains($0.type) } ?? false,
                     row: path.last { $0.type == .cell }?.serial,
