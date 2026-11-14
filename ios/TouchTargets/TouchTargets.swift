@@ -116,10 +116,23 @@ public enum TouchTargets {
         // A target that cannot be hit -- under an opaque bar, behind a sheet --
         // is nobody's problem.
         var hittable: [Int: Bool] = [:]
+        var byType: [XCUIElement.ElementType: [XCUIElement]] = [:]
+        func sameType(_ type: XCUIElement.ElementType) -> [XCUIElement] {
+            if let known = byType[type] { return known }
+            let all = app.descendants(matching: type).allElementsBoundByIndex
+            byType[type] = all
+            return all
+        }
         func canHit(_ target: Target) -> Bool {
             if let known = hittable[target.serial] { return known }
+            // The same element, read again: found by its frame, which can
+            // differ from the snapshot's by a fraction of a point, because its
+            // place among its type shifts as the screen changes. Not found, it
+            // counts as hittable.
             let element = app.descendants(matching: target.type).element(boundBy: target.indexAmongType)
-            let answer = element.exists && element.frame.equalTo(target.frame) ? element.isHittable : true
+            let same = element.exists && element.frame.isClose(to: target.frame) ? element
+                : sameType(target.type).first { $0.frame.isClose(to: target.frame) }
+            let answer = same?.isHittable ?? true
             hittable[target.serial] = answer
             return answer
         }
@@ -298,5 +311,13 @@ extension XCTestCase {
         } catch {
             XCTFail("\(screen): could not read the screen: \(error)", file: file, line: line)
         }
+    }
+}
+
+private extension CGRect {
+    /// Within half a point on every edge.
+    func isClose(to other: CGRect) -> Bool {
+        abs(minX - other.minX) < 0.5 && abs(minY - other.minY) < 0.5
+            && abs(maxX - other.maxX) < 0.5 && abs(maxY - other.maxY) < 0.5
     }
 }
