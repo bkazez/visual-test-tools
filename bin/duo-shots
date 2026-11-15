@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Photograph an app on an iPhone Duo simulator closed, open and partly folded:
+# OUTDIR/closed.png (outer display), open.png and book.png (inner display).
+#
+#   duo-shots UDID BUNDLE OUTDIR [LAUNCH-ARGS...]
+#   duo-shots "$SIM" com.impulsearc.Ancora shots -ancoraDemo
+#
+# The app is relaunched after each fold, so it lays out from scratch on that
+# display; SETTLE (seconds, default 20) is how long it gets before the picture.
+# Run it inside `simq run`, like anything else that drives a simulator.
+set -euo pipefail
+[ $# -ge 3 ] || { sed -n '2,10p' "$0" >&2; exit 2; }
+UDID="$1"; BUNDLE="$2"; OUT="$3"; shift 3
+HERE="$(cd "$(dirname "$0")" && pwd)"
+mkdir -p "$OUT"
+for posture in closed open book; do
+  "$HERE/duo-fold" "$UDID" "$posture"
+  display=primary-1; [ "$posture" = closed ] && display=primary
+  xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE" "$@" >/dev/null
+  sleep "${SETTLE:-20}"
+  xcrun simctl io "$UDID" screenshot --display="$display" --mask=black "$OUT/$posture.png" >/dev/null
+  echo "$OUT/$posture.png"
+done
