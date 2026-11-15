@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Fold or unfold an iPhone Duo simulator, so an app can be tested and
+# photographed on either display, and partly folded.
+#
+#   duo-fold UDID open      # inner display, flat
+#   duo-fold UDID closed    # outer display
+#   duo-fold UDID book      # inner display at about 100 degrees, the fold a reserved region
+#   duo-fold UDID 0.3       # any hinge position, 0.0 closed to 1.0 open
+#
+# Then relaunch the app (`simctl launch --terminate-running-process`) or run its
+# UI tests. Screenshot the inner display with `--display=primary-1`, the outer
+# with `--display=primary`. Powering a display off with `simctl io screenConfig`
+# does NOT move the app: SpringBoard goes by the hinge.
+#
+# The tool runs inside the simulator (ios/DuoFold/duo-fold.m) and is built once
+# per change of its source, into ~/.cache/duo-fold.
+set -euo pipefail
+[ $# -eq 2 ] || { sed -n '2,16p' "$0" >&2; exit 2; }
+UDID="$1"
+case "$2" in
+  open) POSITION=1.0 ;;
+  closed) POSITION=0.0 ;;
+  book) POSITION=0.556 ;;   # 100 of 180 degrees, sbdisplaytool's "book"
+  *) POSITION="$2" ;;
+esac
+
+SRC="$(cd "$(dirname "$0")/../ios/DuoFold" && pwd)"
+HASH="$(cat "$SRC/duo-fold.m" "$SRC/duo-fold.entitlements" | shasum | cut -c1-12)"
+TOOL="$HOME/.cache/duo-fold/$HASH/duo-fold"
+if [ ! -x "$TOOL" ]; then
+  mkdir -p "$(dirname "$TOOL")"
+  xcrun -sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=27.1 -fobjc-arc \
+    -framework Foundation -Wl,-sectcreate,__TEXT,__entitlements,"$SRC/duo-fold.entitlements" \
+    "$SRC/duo-fold.m" -o "$TOOL.tmp"
+  codesign -f -s - "$TOOL.tmp" 2>/dev/null
+  mv "$TOOL.tmp" "$TOOL"
+fi
+xcrun simctl spawn "$UDID" "$TOOL" "$POSITION"
