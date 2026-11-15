@@ -29,7 +29,8 @@ public enum FilmGrain {
         observer = NotificationCenter.default.addObserver(
             forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: .main
         ) { note in
-            MainActor.assumeIsolated { (note.object as? UIWindow).map(cover) }
+            let window = note.object as? UIWindow
+            Task { @MainActor in window.map(cover) }
         }
         for scene in UIApplication.shared.connectedScenes {
             (scene as? UIWindowScene)?.windows.forEach(cover)

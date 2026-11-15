@@ -6,7 +6,7 @@ import PackageDescription
 
 let package = Package(
     name: "visual-test-tools",
-    platforms: [.iOS(.v17)],
+    platforms: [.iOS(.v15)],
     products: [
         .library(name: "TouchTargets", targets: ["TouchTargets"]),
         .library(name: "FilmGrain", targets: ["FilmGrain"]),
