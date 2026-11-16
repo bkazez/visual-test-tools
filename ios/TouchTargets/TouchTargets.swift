@@ -33,7 +33,8 @@
 //      in scrolling content is never compared with one outside it. Pairs
 //      inside one of Apple's own containers are exempt, as for size, and so is
 //      everything on the keyboard. Overlapping targets fail at any size; one
-//      target inside another (a button in its own row) is not a pair.
+//      target inside another (a button in its own row, a button drawn inside
+//      a text field's box as iOS draws a clear button) is not a pair.
 //
 // Before reporting, each offending target is asked whether it can be hit at
 // all, so a row hidden under an opaque bar is not reported against the bar.
@@ -100,7 +101,7 @@ public enum TouchTargets {
         for i in targets.indices {
             for j in targets.indices where j > i {
                 let a = targets[i], b = targets[j]
-                guard a.comparable(with: b) else { continue }
+                guard a.comparable(with: b), !inField(a, b), !inField(b, a) else { continue }
                 let gap = distance(a.frame, b.frame)
                 if gap < rules.minGap - tolerance {
                     let what = gap < 0
@@ -141,6 +142,13 @@ public enum TouchTargets {
             .filter { $0.targets.allSatisfy(canHit) }
             .sorted { $0.severity > $1.severity }
             .map(\.problem)
+    }
+
+    /// A button drawn inside a text field's box is the field's own, as iOS
+    /// draws a field's clear button there; the two are not a pair.
+    private static func inField(_ button: Target, _ field: Target) -> Bool {
+        textTypes.contains(field.type) && !textTypes.contains(button.type)
+            && field.frame.insetBy(dx: -0.5, dy: -0.5).contains(button.frame)
     }
 
     // MARK: - Reading the screen

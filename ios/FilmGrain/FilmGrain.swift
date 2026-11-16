@@ -11,7 +11,9 @@
 // (plus-lighter) and one taking away its dark half (plus-darker), so every
 // pixel moves by the grain alone, near black as much as near white. One grain
 // pixel is one screen pixel, never scaled. The layers sit above everything in
-// the window, sheets included, and take no touches.
+// the window, sheets included, and take no touches. Only the app's own windows
+// are covered: UIKit's (the keyboard's) are empty, and plus-darker over nothing
+// is black over the whole screen.
 import UIKit
 
 @MainActor
@@ -43,7 +45,7 @@ public enum FilmGrain {
     }
 
     fileprivate static func cover(_ window: UIWindow) {
-        guard let halves, let screen = window.windowScene?.screen,
+        guard let halves, isTheApps(window), let screen = window.windowScene?.screen,
               window.layer.sublayers?.contains(where: { $0.name == name }) != true else { return }
         let scale = screen.scale
         // A square as wide as the screen is long, so turning the device needs no redraw.
@@ -65,6 +67,12 @@ public enum FilmGrain {
             layer.zPosition = above
             window.layer.addSublayer(layer)
         }
+    }
+
+    /// A plain UIWindow, or one of a class that is not UIKit's own.
+    static func isTheApps(_ window: UIWindow) -> Bool {
+        let kind: AnyClass = type(of: window)
+        return kind == UIWindow.self || Bundle(for: kind) != Bundle(for: UIWindow.self)
     }
 
     /// The light and dark halves of the 128-centered grain: the first adds what
