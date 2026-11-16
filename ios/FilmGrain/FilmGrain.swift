@@ -17,9 +17,15 @@ import UIKit
 @MainActor
 public enum FilmGrain {
     private static var halves: (light: CGImage, dark: CGImage)?
+    /// The halves mirrored out to each size of window, made once and shared.
+    private static var sheets: [Int: [CGImage]] = [:]
     private static let watcher = Watcher()
     private static var installed = false
     private static let name = "FilmGrain"
+    private static let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+    /// Above every layer UIKit stacks in a window, sheets included. Finite:
+    /// .greatestFiniteMagnitude reaches the render server's floats as infinity.
+    private static let above: CGFloat = 1_000_000
 
     public static func install(bundle: Bundle = .main) {
         guard !installed,
@@ -43,35 +49,46 @@ public enum FilmGrain {
         // A square as wide as the screen is long, so turning the device needs no redraw.
         let points = max(screen.bounds.width, screen.bounds.height)
         let pixels = Int((points * scale).rounded(.up))
-        for (half, filter) in [(halves.light, "plusL"), (halves.dark, "plusD")] {
+        if sheets[pixels] == nil {
+            let made = [halves.light, halves.dark].compactMap { mirrored($0, to: pixels) }
+            guard made.count == 2 else { return }
+            sheets[pixels] = made
+        }
+        for (sheet, filter) in zip(sheets[pixels]!, ["plusL", "plusD"]) {
             let layer = CALayer()
             layer.name = name
-            layer.contents = mirrored(half, to: pixels)
+            layer.contents = sheet
             layer.contentsScale = scale
             layer.contentsGravity = .topLeft
             layer.frame = CGRect(x: 0, y: 0, width: points, height: points)
             layer.compositingFilter = filter
-            layer.zPosition = .greatestFiniteMagnitude
+            layer.zPosition = above
             window.layer.addSublayer(layer)
         }
     }
 
     /// The light and dark halves of the 128-centered grain: the first adds what
     /// is above 128, the second (white less what is below 128) takes it away.
+    /// Both are 8-bit RGB, the format every GPU samples alike, never one-channel gray.
     private static func split(_ image: CGImage) -> (light: CGImage, dark: CGImage)? {
         let w = image.width, h = image.height
         var gray = [UInt8](repeating: 0, count: w * h)
         guard let ctx = CGContext(data: &gray, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
                                   space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        let light = gray.map { $0 > 128 ? $0 - 128 : 0 }
-        let dark = gray.map { $0 < 128 ? 255 - (128 - $0) : 255 }
-        func picture(_ bytes: [UInt8]) -> CGImage? {
-            CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: w,
-                    space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                    provider: CGDataProvider(data: Data(bytes) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        func picture(_ level: (UInt8) -> UInt8) -> CGImage? {
+            var rgbx = [UInt8](repeating: 255, count: w * h * 4)
+            for (i, g) in gray.enumerated() {
+                let v = level(g)
+                rgbx[4 * i] = v; rgbx[4 * i + 1] = v; rgbx[4 * i + 2] = v
+            }
+            return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                           space: srgb, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                           provider: CGDataProvider(data: Data(rgbx) as CFData)!, decode: nil, shouldInterpolate: false,
+                           intent: .defaultIntent)
         }
-        guard let l = picture(light), let d = picture(dark) else { return nil }
+        guard let l = picture({ $0 > 128 ? $0 - 128 : 0 }),
+              let d = picture({ $0 < 128 ? 255 - (128 - $0) : 255 }) else { return nil }
         return (l, d)
     }
 
@@ -79,7 +96,7 @@ public enum FilmGrain {
     /// negative would continue.
     private static func mirrored(_ image: CGImage, to side: Int) -> CGImage? {
         guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+                                  space: srgb, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
         ctx.interpolationQuality = .none
         let w = image.width, h = image.height
         for row in 0..<(side + h - 1) / h {
