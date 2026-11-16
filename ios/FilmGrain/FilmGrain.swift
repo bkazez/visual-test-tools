@@ -17,27 +17,26 @@ import UIKit
 @MainActor
 public enum FilmGrain {
     private static var halves: (light: CGImage, dark: CGImage)?
-    private static var observer: NSObjectProtocol?
+    private static let watcher = Watcher()
+    private static var installed = false
     private static let name = "FilmGrain"
 
     public static func install(bundle: Bundle = .main) {
-        guard observer == nil,
+        guard !installed,
               let url = bundle.url(forResource: name, withExtension: "png"),
               let source = UIImage(contentsOfFile: url.path)?.cgImage,
               let made = split(source) else { return }
         halves = made
-        observer = NotificationCenter.default.addObserver(
-            forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: .main
-        ) { note in
-            let window = note.object as? UIWindow
-            Task { @MainActor in window.map(cover) }
-        }
+        installed = true
+        // Covered as the window appears, so no frame of it is shown without grain.
+        NotificationCenter.default.addObserver(watcher, selector: #selector(Watcher.windowBecameVisible(_:)),
+                                               name: UIWindow.didBecomeVisibleNotification, object: nil)
         for scene in UIApplication.shared.connectedScenes {
             (scene as? UIWindowScene)?.windows.forEach(cover)
         }
     }
 
-    private static func cover(_ window: UIWindow) {
+    fileprivate static func cover(_ window: UIWindow) {
         guard let halves, let screen = window.windowScene?.screen,
               window.layer.sublayers?.contains(where: { $0.name == name }) != true else { return }
         let scale = screen.scale
@@ -93,5 +92,12 @@ public enum FilmGrain {
             }
         }
         return ctx.makeImage()
+    }
+}
+
+@MainActor
+private final class Watcher: NSObject {
+    @objc func windowBecameVisible(_ note: Notification) {
+        (note.object as? UIWindow).map(FilmGrain.cover)
     }
 }
