@@ -1,6 +1,7 @@
 // swift-tools-version:5.9
 // TouchTargets: fail a UI test when a screen's touch targets are too small or
-// too close together. See ios/TouchTargets/TouchTargets.swift.
+// too close together. See ios/TouchTargets/TouchTargets.swift. Its module also
+// has assertTypography: fail when a screen shows a straight quote.
 // FilmGrain: real 35mm film grain over an app's whole UI. See ios/FilmGrain/FilmGrain.swift.
 import PackageDescription
 
