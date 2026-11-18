@@ -14,8 +14,8 @@
 //      several controls has each measured as itself. A row with no control in
 //      it is text, not a target. Controls Apple draws itself
 //      -- navigation bar, tab bar, toolbar, keyboard, segmented control,
-//      alerts, a map's own Legal link and compass, and the text and context
-//      menus with their page arrows -- are left alone: their hit areas extend past what the
+//      alerts, a map's own Legal link and compass, a sheet's grabber, and the
+//      text and context menus with their page arrows -- are left alone: their hit areas extend past what the
 //      accessibility frame reports. So is a text field's size: a field that
 //      grows with its text reports the text's height, not the box drawn
 //      around it, so make the whole box focus the field instead (a tap
@@ -222,7 +222,7 @@ public enum TouchTargets {
             index = counts[type, default: 0]
             counts[type] = index + 1
             let frame = node.frame
-            if !frame.isEmpty, frame.intersects(screen) {
+            if !frame.isEmpty, frame.intersects(screen), !isSheetGrabber(node) {
                 targets.append(Target(
                     serial: mine,
                     type: type,
@@ -249,6 +249,12 @@ public enum TouchTargets {
             collect(child, path: below, screen: screen, lists: lists, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
                     into: &targets, counts: &counts, rows: &rows)
         }
+    }
+
+    /// The grabber iOS draws atop a sheet that shows its drag indicator. It
+    /// has no element type of its own, so it is known by the name iOS gives it.
+    private static func isSheetGrabber(_ node: XCUIElementSnapshot) -> Bool {
+        node.elementType == .button && node.identifier.isEmpty && node.label == "Sheet Grabber"
     }
 
     private static func wrapsMap(_ node: XCUIElementSnapshot) -> Bool {
