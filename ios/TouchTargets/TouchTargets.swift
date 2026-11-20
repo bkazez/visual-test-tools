@@ -36,6 +36,17 @@
 //      target inside another (a button in its own row, a button drawn inside
 //      a text field's box as iOS draws a clear button) is not a pair.
 //
+//   3. VISIBLE. Every target shows something: at least `minMarked` (1.5%)
+//      of the pixels in the middle half of its frame, where its glyph or
+//      label sits, are a tenth brighter or darker than that area's commonest
+//      shade. The edges are left out because a field's outline or a bar's
+//      rule running through them is not the target. A button that reports
+//      itself to accessibility but draws nothing -- white on white, a fill
+//      that never sized itself, a view faded to nothing -- passes `exists`
+//      and `isHittable` and fails here. So does a control left under an
+//      opaque overlay (a drawer slid over a tab bar): VoiceOver still finds
+//      it, so hide what the overlay covers (`.accessibilityHidden`).
+//
 // Before reporting, each offending target is asked whether it can be hit at
 // all, so a row hidden under an opaque bar is not reported against the bar.
 
@@ -48,11 +59,14 @@ public struct TouchTargetRules: Sendable {
     public var minGap: CGFloat
     /// Accessibility identifiers of scroll views whose rows are a list drawn without a table or collection view.
     public var lists: Set<String>
+    /// The least share of a target's pixels that must stand out from its commonest shade.
+    public var minMarked: Double
 
-    public init(minSize: CGFloat = 44, minGap: CGFloat = 16, lists: Set<String> = []) {
+    public init(minSize: CGFloat = 44, minGap: CGFloat = 16, lists: Set<String> = [], minMarked: Double = 0.015) {
         self.minSize = minSize
         self.minGap = minGap
         self.lists = lists
+        self.minMarked = minMarked
     }
 }
 
@@ -112,6 +126,15 @@ public enum TouchTargets {
                     ), [a, b]))
                 }
             }
+        }
+
+        let picture = Picture(app.screenshot().image, of: root.frame)
+        for target in targets where target.systems.isEmpty && !textTypes.contains(target.type) {
+            guard let marked = picture?.marked(target.frame.insetBy(dx: target.frame.width / 4, dy: target.frame.height / 4)),
+                  marked < rules.minMarked else { continue }
+            problems.append((rules.minSize, TouchTargetProblem(description:
+                "\(target.name) shows nothing: \(String(format: "%.1f", marked * 100))% of the middle of its \(points(target.frame.width))×\(points(target.frame.height)) pt stands out from its background"
+            ), [target]))
         }
 
         // A target that cannot be hit -- under an opaque bar, behind a sheet --
@@ -325,6 +348,54 @@ extension XCTestCase {
         } catch {
             XCTFail("\(screen): could not read the screen: \(error)", file: file, line: line)
         }
+    }
+}
+
+/// The screen as drawn, to ask whether anything is drawn where a target is.
+private struct Picture {
+    let width: Int
+    let height: Int
+    let scale: CGFloat
+    let origin: CGPoint
+    let luminance: [Float]
+
+    init?(_ image: UIImage, of screen: CGRect) {
+        guard let cg = image.cgImage, screen.width > 0 else { return nil }
+        let width = cg.width, height = cg.height
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = rgba.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        self.width = width
+        self.height = height
+        scale = CGFloat(width) / screen.width
+        origin = screen.origin
+        luminance = (0..<(width * height)).map { i in
+            (0.2126 * Float(rgba[i * 4]) + 0.7152 * Float(rgba[i * 4 + 1]) + 0.0722 * Float(rgba[i * 4 + 2])) / 255
+        }
+    }
+
+    /// The share of the pixels in `frame` at least a tenth brighter or darker
+    /// than its commonest shade: about 0 for an empty box, several percent
+    /// for a glyph or a word.
+    func marked(_ frame: CGRect) -> Double? {
+        let x0 = max(0, Int(((frame.minX - origin.x) * scale).rounded()))
+        let x1 = min(width, Int(((frame.maxX - origin.x) * scale).rounded()))
+        let y0 = max(0, Int(((frame.minY - origin.y) * scale).rounded()))
+        let y1 = min(height, Int(((frame.maxY - origin.y) * scale).rounded()))
+        guard x1 > x0, y1 > y0 else { return nil }
+        var bins = [Int](repeating: 0, count: 64)
+        for y in y0..<y1 { for x in x0..<x1 { bins[min(63, Int(luminance[y * width + x] * 64))] += 1 } }
+        let commonest = bins.indices.max { bins[$0] < bins[$1] } ?? 0
+        let background = (Float(commonest) + 0.5) / 64
+        var differing = 0
+        for y in y0..<y1 { for x in x0..<x1 where abs(luminance[y * width + x] - background) >= 0.1 { differing += 1 } }
+        return Double(differing) / Double((x1 - x0) * (y1 - y0))
     }
 }
 
