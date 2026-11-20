@@ -10,9 +10,12 @@
 # on the newest iPhone simulator instead, to check a test before it touches
 # the phone. The recording comes from Xcode's own UI-test screen capture,
 # switched on in the .xctestrun, so the project needs no test plan for it.
+# It is the phone's portrait framebuffer; ROTATE=90 or 270 (degrees clockwise)
+# turns a landscape app upright, the way a reviewer holds the phone for it.
 set -euo pipefail
 
-[ $# -eq 4 ] || { sed -n '2,13p' "$0" >&2; exit 2; }
+[ $# -eq 4 ] || { sed -n '2,15p' "$0" >&2; exit 2; }
+case "${ROTATE:-0}" in 0) turn= ;; 90) turn=transpose=1 ;; 270) turn=transpose=2 ;; *) echo "device-demo: ROTATE is 90 or 270" >&2; exit 2 ;; esac
 project="$1"; scheme="$2"; test_id="$3"; out="$4"
 
 if [ "${SIMULATOR:-}" = 1 ]; then
@@ -62,6 +65,10 @@ xcrun xcresulttool export attachments --path "$work/result.xcresult" --output-pa
 video="$(find "$work/attachments" -name '*.mp4' -o -name '*.mov' | head -1)"
 [ -n "$video" ] || { echo "device-demo: the test passed but recorded no video ($work)" >&2; exit 1; }
 mkdir -p "$(dirname "$out")"
-cp "$video" "$out"
+if [ -n "$turn" ]; then
+  ffmpeg -loglevel error -y -i "$video" -vf "$turn" -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a copy "$out"
+else
+  cp "$video" "$out"
+fi
 seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")"
 echo "$out ($seconds s)"
