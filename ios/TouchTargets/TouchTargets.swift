@@ -396,11 +396,14 @@ private struct Picture {
     /// The share of the pixels in `frame` at least a tenth brighter or darker
     /// than its commonest shade: about 0 for an empty box, several percent
     /// for a glyph or a word.
+    /// Nil for a frame the screen cuts off: the part on screen may be only
+    /// its blank margin, as for a list row half under the bottom edge.
     func marked(_ frame: CGRect) -> Double? {
-        let x0 = max(0, Int(((frame.minX - origin.x) * scale).rounded()))
-        let x1 = min(width, Int(((frame.maxX - origin.x) * scale).rounded()))
-        let y0 = max(0, Int(((frame.minY - origin.y) * scale).rounded()))
-        let y1 = min(height, Int(((frame.maxY - origin.y) * scale).rounded()))
+        let px = { (value: CGFloat, start: CGFloat) in Int(((value - start) * self.scale).rounded()) }
+        let left = px(frame.minX, origin.x), right = px(frame.maxX, origin.x)
+        let top = px(frame.minY, origin.y), bottom = px(frame.maxY, origin.y)
+        guard left >= -1, top >= -1, right <= width + 1, bottom <= height + 1 else { return nil }
+        let x0 = max(0, left), x1 = min(width, right), y0 = max(0, top), y1 = min(height, bottom)
         guard x1 > x0, y1 > y0 else { return nil }
         var bins = [Int](repeating: 0, count: 64)
         for y in y0..<y1 { for x in x0..<x1 { bins[min(63, Int(luminance[y * width + x] * 64))] += 1 } }
