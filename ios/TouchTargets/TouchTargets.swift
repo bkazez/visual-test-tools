@@ -130,7 +130,17 @@ public enum TouchTargets {
 
         let picture = Picture(app.screenshot().image, of: root.frame)
         for target in targets where target.systems.isEmpty && !textTypes.contains(target.type) {
-            guard let marked = picture?.marked(target.frame.insetBy(dx: target.frame.width / 4, dy: target.frame.height / 4)),
+            // The middle, a quarter of the shorter side in from every edge, so a
+            // box's border stays out; read in squares, so a wide row with a short
+            // left-aligned word counts that word rather than the empty rest.
+            let margin = min(target.frame.width, target.frame.height) / 4
+            let middle = target.frame.insetBy(dx: margin, dy: margin)
+            let side = min(middle.width, middle.height)
+            guard side > 0, let picture else { continue }
+            let squares = stride(from: middle.minX, to: middle.maxX, by: side).map {
+                CGRect(x: $0, y: middle.minY, width: min(side, middle.maxX - $0), height: middle.height)
+            }
+            guard let marked = squares.compactMap({ picture.marked($0) }).max(),
                   marked < rules.minMarked else { continue }
             problems.append((rules.minSize, TouchTargetProblem(description:
                 "\(target.name) shows nothing: \(String(format: "%.1f", marked * 100))% of the middle of its \(points(target.frame.width))×\(points(target.frame.height)) pt stands out from its background"
