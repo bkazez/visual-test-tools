@@ -378,6 +378,9 @@ private struct Picture {
         luminance = (0..<(width * height)).map { i in
             (0.2126 * Float(rgba[i * 4]) + 0.7152 * Float(rgba[i * 4 + 1]) + 0.0722 * Float(rgba[i * 4 + 2])) / 255
         }
+        // XCUITest photographs iPhone Duo's inner display as solid black: a
+        // picture of one shade shows nothing about any target, so it is not read.
+        guard let first = luminance.first, luminance.contains(where: { $0 != first }) else { return nil }
     }
 
     /// The share of the pixels in `frame` at least a tenth brighter or darker
