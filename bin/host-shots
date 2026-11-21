@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Answer hostScreenshot() from a UI test: photograph DISPLAY of simulator UDID
+# into DIR/NAME.png each time the test leaves DIR/NAME.request. For a display
+# XCUITest photographs as solid black, such as iPhone Duo's inner one.
+#
+#   export TEST_RUNNER_HOST_SHOTS="$DIR"
+#   host-shots "$UDID" "$DIR" primary-1 &     # inner display; primary is the outer
+#   xcodebuild test ...; kill $!
+#
+# Run it inside the same `simq run` as the test.
+set -euo pipefail
+[ $# -eq 3 ] || { sed -n '2,10p' "$0" >&2; exit 2; }
+UDID="$1"; DIR="$2"; DISPLAY_NAME="$3"
+mkdir -p "$DIR"
+while :; do
+  for request in "$DIR"/*.request; do
+    [ -e "$request" ] || continue
+    name="$(basename "$request" .request)"
+    xcrun simctl io "$UDID" screenshot --display="$DISPLAY_NAME" "$DIR/$name.tmp.png" >/dev/null 2>&1
+    # simctl adds an alpha channel, all opaque; the App Store refuses one.
+    magick "$DIR/$name.tmp.png" -alpha off "PNG24:$DIR/$name.tmp.png"
+    mv "$DIR/$name.tmp.png" "$DIR/$name.png"
+    rm -f "$request"
+  done
+  sleep 0.2
+done
