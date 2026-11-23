@@ -3,6 +3,8 @@
 // too close together. See ios/TouchTargets/TouchTargets.swift. Its module also
 // has assertTypography: fail when a screen shows a straight quote.
 // FilmGrain: real 35mm film grain over an app's whole UI. See ios/FilmGrain/FilmGrain.swift.
+// ShowTouches: every touch drawn by the app, for screen recordings. See ios/ShowTouches/ShowTouches.swift.
+// Filming: a filmed UI test taps and types as a person does. See ios/Filming/Filming.swift.
 import PackageDescription
 
 let package = Package(
@@ -11,9 +13,13 @@ let package = Package(
     products: [
         .library(name: "TouchTargets", targets: ["TouchTargets"]),
         .library(name: "FilmGrain", targets: ["FilmGrain"]),
+        .library(name: "ShowTouches", targets: ["ShowTouches"]),
+        .library(name: "Filming", targets: ["Filming"]),
     ],
     targets: [
         .target(name: "FilmGrain", path: "ios/FilmGrain"),
+        .target(name: "ShowTouches", path: "ios/ShowTouches"),
+        .target(name: "Filming", path: "ios/Filming", linkerSettings: [.linkedFramework("XCTest")]),
         .target(
             name: "TouchTargets",
             path: "ios/TouchTargets",
