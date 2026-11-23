@@ -25,8 +25,9 @@
 //   2. GAP. Two targets are at least `minGap` (16 pt) apart, edge to edge,
 //      when the distance between them is a layout decision: both fixed on the
 //      screen (a key above a tab bar), both in the same scrolling content, or
-//      both in the same row of a list (a table or collection view, or a scroll
-//      view named in `rules.lists`). Rows of a list abut by design, and the
+//      both in the same row of a list (a table or collection view, or a view
+//      named in `rules.lists`: a scroll view of rows, or segments drawn
+//      without a segmented control). Rows of a list abut by design, and the
 //      swipe buttons iOS slides out beside a row are iOS's, so targets in two
 //      different rows, or outside any row, of one list are not compared. A row
 //      scrolled half under a bar is not a layout decision either, so a target
@@ -57,7 +58,8 @@ public struct TouchTargetRules: Sendable {
     public var minSize: CGFloat
     /// The smallest edge-to-edge distance between two targets, in points.
     public var minGap: CGFloat
-    /// Accessibility identifiers of scroll views whose rows are a list drawn without a table or collection view.
+    /// Accessibility identifiers of views whose children abut by design: a scroll view whose rows are a list drawn
+    /// without a table or collection view, or a row of segments drawn without a segmented control.
     public var lists: Set<String>
     /// The least share of a target's pixels that must stand out from its commonest shade.
     public var minMarked: Double
@@ -276,7 +278,7 @@ public enum TouchTargets {
         // puts its Legal link beside the map, in a view no larger than the map.
         let kind: XCUIElement.ElementType = type == .window && holdsMenuItem(node) ? .menu
             : wrapsMap(node) ? .map
-            : type == .scrollView && lists.contains(node.identifier) ? .collectionView : type
+            : lists.contains(node.identifier) ? .collectionView : type
         let below = path + [Ancestor(type: kind, serial: mine)]
         for (index, child) in node.children.enumerated() {
             collect(child, path: below, screen: screen, lists: lists, windowIndex: windowIndex ?? (path.isEmpty ? index : nil),
