@@ -1,7 +1,7 @@
 // Filming: a UI test that is filmed acts as a person does, slowly enough to be
 // seen. A tap holds long enough for the row or button to show it pressed, and
-// text is typed fast, as a fluent typist does: the viewer waits for what the
-// typing finds, not for the letters. The film's script records from the test's
+// text goes in a letter at a time, fast: the viewer waits for what the typing
+// finds, not for the letters. The film's script records from the test's
 // start mark to its end mark, so the film opens on the app, not the build, and
 // ends before the app quits.
 //
@@ -24,10 +24,12 @@ extension XCTestCase {
         Thread.sleep(forTimeInterval: seconds)
     }
 
-    /// Types fast, in one go: XCUITest still puts each letter on the keyboard, at a fluent typist's speed. A pause
-    /// between letters only makes the viewer wait.
-    public func typeByHand(_ text: String, into field: XCUIElement) {
-        field.typeText(text)
+    /// Types a letter at a time, at a fast typist's speed: the viewer sees the letters go in but does not wait on them.
+    public func typeByHand(_ text: String, into field: XCUIElement, every seconds: TimeInterval = 0.04) {
+        for letter in text {
+            field.typeText(String(letter))
+            pause(seconds)
+        }
     }
 
     /// Taps the way a person does: down long enough for the pressed state to show, then a beat to see what it did.
