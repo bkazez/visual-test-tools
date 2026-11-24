@@ -11,9 +11,18 @@
 # DERIVED=DIR builds into DIR and keeps it, so a second film of the same test
 # builds nothing. The test run gets FILM_MARK, so VMII-style test cases can
 # launch the app in its capture mode (ShowTouches) whenever they are filmed.
+# STATUS_TIME=HH:MM puts that time in the status bar instead of 9:41, for a
+# film whose flights or trips are laid around the moment it is made.
+# PRIVACY="grant location com.example.App; revoke contacts com.example.App"
+# settles each permission once the test has installed the app (an install
+# resets them), so no prompt is filmed.
+#
+# Once the recording is rolling, the epoch it began at is in FILM_MARK.rolling,
+# for a test that plays a storyboard against it (Filming's playFilm). Whatever
+# the test writes to FILM_MARK.log is kept beside the film as OUT.log.
 # Wrap it in simq: `simq run -- sim-film ...`.
 set -euo pipefail
-[ $# -eq 5 ] || { sed -n '2,14p' "$0" >&2; exit 2; }
+[ $# -eq 5 ] || { sed -n '2,22p' "$0" >&2; exit 2; }
 project="$1"; scheme="$2"; test_id="$3"; device="$4"; out="$5"
 
 work="$(mktemp -d -t sim-film)"
@@ -31,7 +40,7 @@ sim="$(xcrun simctl create "sim-film $device" "com.apple.CoreSimulator.SimDevice
 xcrun simctl boot "$sim"
 xcrun simctl bootstatus "$sim" >/dev/null
 [ "$device" = iPhone-Duo-open ] && "$(dirname "$0")/duo-fold" "$sim" open
-xcrun simctl status_bar "$sim" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+xcrun simctl status_bar "$sim" override --time "${STATUS_TIME:-9:41}" --dataNetwork wifi --wifiMode active --wifiBars 3 \
   --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
 # The keyboard's first-use tips about sliding to type would cover the film.
 for tip in DidShowContinuousPathIntroduction DidShowGestureKeyboardIntroduction; do
@@ -43,22 +52,36 @@ TEST_RUNNER_FILM_MARK="$mark" xcodebuild test-without-building -project "$projec
   -destination "platform=iOS Simulator,id=$sim" -derivedDataPath "$derived" -only-testing:"$test_id" \
   -resultBundlePath "$work/run.xcresult" -quiet &
 running=$!
+IFS=';' read -ra settled <<< "${PRIVACY:-}"
+for setting in "${settled[@]}"; do
+  [ -n "${setting// }" ] || continue
+  bundle="${setting##* }"
+  ( until xcrun simctl get_app_container "$sim" "$bundle" >/dev/null 2>&1; do sleep 0.5; done
+    xcrun simctl privacy "$sim" $setting ) &
+done
 await() {
   until [ -e "$mark.$1" ]; do
     kill -0 "$running" 2>/dev/null || {
       xcrun xcresulttool get test-results tests --path "$work/run.xcresult" 2>/dev/null | grep -E '"(name|result)"' >&2 || true
-      echo "sim-film: the test ended before its $1 mark" >&2
+      rm -rf "${out%.*}.xcresult"; cp -R "$work/run.xcresult" "${out%.*}.xcresult" 2>/dev/null || true
+      echo "sim-film: the test ended before its $1 mark; its results, screenshots and all, are in ${out%.*}.xcresult" >&2
       exit 1
     }
     sleep 0.1
   done
 }
 await start
-xcrun simctl io "$sim" recordVideo --display="$display" --codec h264 --force "$work/film.mp4" &
+xcrun simctl io "$sim" recordVideo --display="$display" --codec h264 --force "$work/film.mp4" 2>"$work/recorder.log" &
 recorder=$!
+until grep -q "Recording started" "$work/recorder.log"; do
+  kill -0 "$recorder" 2>/dev/null || { cat "$work/recorder.log" >&2; echo "sim-film: the recording never started" >&2; exit 1; }
+  sleep 0.02
+done
+python3 -c 'import time; print(f"{time.time():.3f}")' > "$mark.rolling"
 await end
 kill -INT "$recorder"
 wait "$recorder" || true
 wait "$running" || { echo "sim-film: the test failed after it was filmed" >&2; exit 1; }
 mv "$work/film.mp4" "$out"
+[ ! -e "$mark.log" ] || cp "$mark.log" "${out%.*}.log"
 ffprobe -v error -show_entries stream=width,height:format=duration -of csv=p=0 "$out"
