@@ -56,6 +56,15 @@ extension XCTestCase {
         pause(after)
     }
 
+    /// Scrolls the way a thumb does: a slow drag up `fraction` of the element's height from below its middle, held a
+    /// moment at the end so the content stops where the finger left it.
+    public func scrollByHand(_ element: XCUIElement, by fraction: CGFloat = 0.3, after: TimeInterval = 0.3) {
+        let from = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5 + fraction / 2))
+        let to = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5 - fraction / 2))
+        from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
+        pause(after)
+    }
+
     /// Tells the film's script the film starts or ends here.
     public func filmMark(_ moment: String) throws {
         guard let path = ProcessInfo.processInfo.environment["FILM_MARK"] else { return }
