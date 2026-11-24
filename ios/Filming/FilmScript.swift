@@ -36,9 +36,9 @@ public struct FilmScript {
         public let at: TimeInterval
         public let step: String
         /// How many times slower the app plays the stretch from this gesture to
-        /// the next, in a film, so a loaded simulator draws every frame of it.
-        /// The test holds the stretch that much longer, and ui-test-film plays
-        /// it back that much faster.
+        /// the next, in a film, so a loaded simulator draws every frame of it
+        /// (the app reads it at filmPacePath). The test holds the stretch that
+        /// much longer, and ui-test-film plays it back that much faster.
         public let slow: Double
     }
 
@@ -51,6 +51,9 @@ public struct FilmScript {
     }
 
     public let seconds: TimeInterval
+    /// How many times slower the app plays the whole film, unless a gesture
+    /// says otherwise for the stretch after it: the storyboard's `"slow"`, or 1.
+    public let slow: Double
     public let gestures: [Gesture]
     public let moves: [Move]
 
@@ -61,9 +64,11 @@ public struct FilmScript {
         }
         let events = (board["events"] as? [[String: Any]] ?? [])
         seconds = Self.number(board["seconds"]) ?? 30
+        let slow = Self.number(board["slow"]) ?? 1
+        self.slow = slow
         gestures = events.compactMap { event in
             guard let step = event["do"] as? String, let at = Self.number(event["at"]) else { return nil }
-            return Gesture(at: at, step: step, slow: Self.number(event["slow"]) ?? 1)
+            return Gesture(at: at, step: step, slow: Self.number(event["slow"]) ?? slow)
         }.sorted { $0.at < $1.at }
         moves = try events.compactMap { event in
             guard let camera = event["camera"] as? [String: Any], let at = Self.number(event["at"]) else { return nil }
@@ -71,16 +76,6 @@ public struct FilmScript {
             return Move(at: at, to: Self.number(camera["to"]) ?? 1,
                         seconds: Self.number(camera["seconds"]) ?? 1, place: place)
         }.sorted { $0.at < $1.at }
-    }
-
-    /// The storyboard the film's test is playing (FILM_BOARD), or nil unfilmed.
-    public static func playing() throws -> FilmScript? {
-        try ProcessInfo.processInfo.environment["FILM_BOARD"].map(FilmScript.init(path:))
-    }
-
-    /// How slow the app is to play the stretch after STEP: its `"slow"`, or 1.
-    public func slow(after step: String) -> Double {
-        gestures.first { $0.step == step }?.slow ?? 1
     }
 
     static func number(_ value: Any?) -> Double? {
@@ -121,6 +116,7 @@ extension XCTestCase {
         guard let board = environment["FILM_BOARD"] else { return }
         let script = try FilmScript(path: board)
         Self.skipQuiescence()
+        try Self.setFilmPace(script.slow)
         try filmMark("start")
         let rolling = try filmRolling()
         let zero = rolling + Self.filmLeadIn
@@ -143,13 +139,16 @@ extension XCTestCase {
         // and at `ended - lead` in the recording, and the recording between one
         // touch and the next is at least as long as the film's, so the cut before
         // a touch only ever drops a moment of the screen standing still.
-        var lastFilm: TimeInterval = 0, lastRecording: TimeInterval = 0, lastSlow: Double = 1
+        var lastFilm: TimeInterval = 0, lastRecording: TimeInterval = 0, lastSlow = script.slow
         for gesture in script.gestures {
-            let touch = gesture.at - lead(gesture.step)
+            // LEAD is the recording's seconds from touch to landing; a slowed film
+            // shows them that many times shorter.
+            let touch = gesture.at - lead(gesture.step) / gesture.slow
             try aim(until: touch)
             let begin = max(touch, lastRecording + (touch - lastFilm) * lastSlow)
             wait(until: zero + begin)
             let began = Date().timeIntervalSince1970 - zero
+            try Self.setFilmPace(gesture.slow)
             try perform(gesture.step)
             let ended = Date().timeIntervalSince1970 - zero
             lastFilm = touch
@@ -159,7 +158,8 @@ extension XCTestCase {
                              "ended": ended, "cut": lastRecording, "slow": gesture.slow])
         }
         try aim(until: script.seconds)
-        wait(until: zero + lastRecording + (script.seconds - lastFilm) * lastSlow)
+        // Half a second over, so the cut never runs a frame short of the end.
+        wait(until: zero + lastRecording + (script.seconds - lastFilm) * lastSlow + 0.5)
         try filmMark("end")
 
         guard let mark = environment["FILM_MARK"] else { return }
@@ -167,6 +167,19 @@ extension XCTestCase {
                                   "gestures": gestures, "camera": camera]
         try JSONSerialization.data(withJSONObject: log, options: [.prettyPrinted, .sortedKeys])
             .write(to: URL(fileURLWithPath: "\(mark).log"))
+    }
+
+    /// Where the app reads how many times slower it is to play right now: pass
+    /// it to the app as FILM_PACE. playFilm writes each stretch's `"slow"` there
+    /// as the stretch begins; an app that paces its own clocks and animations by
+    /// it gives a loaded simulator that many times the wall time per frame.
+    public static var filmPacePath: String? {
+        ProcessInfo.processInfo.environment["FILM_MARK"].map { "\($0).pace" }
+    }
+
+    private static func setFilmPace(_ slow: Double) throws {
+        guard let path = filmPacePath else { return }
+        try "\(slow)".write(toFile: path, atomically: true, encoding: .utf8)
     }
 
     /// When sim-film's recording began, in seconds since 1970: it writes the
@@ -188,7 +201,7 @@ extension XCTestCase {
 
     /// Where PLACE is once it has stopped moving: a page still sliding in
     /// would aim the camera where the thing is passing through.
-    public func settledPlace(_ name: String, in app: XCUIApplication, timeout: TimeInterval = 5) -> CGRect? {
+    public func settledPlace(_ name: String, in app: XCUIApplication, timeout: TimeInterval = 20) -> CGRect? {
         let deadline = Date().addingTimeInterval(timeout)
         var last = place(name, in: app)
         while Date() < deadline {
