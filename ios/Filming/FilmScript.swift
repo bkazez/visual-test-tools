@@ -35,6 +35,11 @@ public struct FilmScript {
     public struct Gesture {
         public let at: TimeInterval
         public let step: String
+        /// How many times slower the app plays the stretch from this gesture to
+        /// the next, in a film, so a loaded simulator draws every frame of it.
+        /// The test holds the stretch that much longer, and ui-test-film plays
+        /// it back that much faster.
+        public let slow: Double
     }
 
     public struct Move {
@@ -58,7 +63,7 @@ public struct FilmScript {
         seconds = Self.number(board["seconds"]) ?? 30
         gestures = events.compactMap { event in
             guard let step = event["do"] as? String, let at = Self.number(event["at"]) else { return nil }
-            return Gesture(at: at, step: step)
+            return Gesture(at: at, step: step, slow: Self.number(event["slow"]) ?? 1)
         }.sorted { $0.at < $1.at }
         moves = try events.compactMap { event in
             guard let camera = event["camera"] as? [String: Any], let at = Self.number(event["at"]) else { return nil }
@@ -66,6 +71,16 @@ public struct FilmScript {
             return Move(at: at, to: Self.number(camera["to"]) ?? 1,
                         seconds: Self.number(camera["seconds"]) ?? 1, place: place)
         }.sorted { $0.at < $1.at }
+    }
+
+    /// The storyboard the film's test is playing (FILM_BOARD), or nil unfilmed.
+    public static func playing() throws -> FilmScript? {
+        try ProcessInfo.processInfo.environment["FILM_BOARD"].map(FilmScript.init(path:))
+    }
+
+    /// How slow the app is to play the stretch after STEP: its `"slow"`, or 1.
+    public func slow(after step: String) -> Double {
+        gestures.first { $0.step == step }?.slow ?? 1
     }
 
     static func number(_ value: Any?) -> Double? {
@@ -128,22 +143,23 @@ extension XCTestCase {
         // and at `ended - lead` in the recording, and the recording between one
         // touch and the next is at least as long as the film's, so the cut before
         // a touch only ever drops a moment of the screen standing still.
-        var lastFilm: TimeInterval = 0, lastRecording: TimeInterval = 0
+        var lastFilm: TimeInterval = 0, lastRecording: TimeInterval = 0, lastSlow: Double = 1
         for gesture in script.gestures {
             let touch = gesture.at - lead(gesture.step)
             try aim(until: touch)
-            let begin = max(touch, lastRecording + touch - lastFilm)
+            let begin = max(touch, lastRecording + (touch - lastFilm) * lastSlow)
             wait(until: zero + begin)
             let began = Date().timeIntervalSince1970 - zero
             try perform(gesture.step)
             let ended = Date().timeIntervalSince1970 - zero
             lastFilm = touch
+            lastSlow = gesture.slow
             lastRecording = max(ended - lead(gesture.step), began)
             gestures.append(["at": gesture.at, "do": gesture.step, "touch": touch, "began": began,
-                             "ended": ended, "cut": lastRecording])
+                             "ended": ended, "cut": lastRecording, "slow": gesture.slow])
         }
         try aim(until: script.seconds)
-        wait(until: zero + lastRecording + script.seconds - lastFilm)
+        wait(until: zero + lastRecording + (script.seconds - lastFilm) * lastSlow)
         try filmMark("end")
 
         guard let mark = environment["FILM_MARK"] else { return }
