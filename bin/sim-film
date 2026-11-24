@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Film one UI test on a throwaway simulator, from its start mark to its end
+# mark (Filming's filmMark), as an H.264 recording of what the app draws.
+#
+#   sim-film PROJECT SCHEME TEST DEVICE OUT.mp4
+#   sim-film VMII.xcodeproj VMII VMIIUITests/StoreSearchVideoTests/testTour iPhone-17-Pro-Max iphone.mp4
+#   sim-film VMII.xcodeproj VMII VMIIUITests/StoreSearchVideoTests/testTour iPhone-Duo-open duo.mp4
+#
+# DEVICE is a simulator device type (xcrun simctl list devicetypes);
+# iPhone-Duo-open is an iPhone Duo held open, filmed on its inner display.
+# DERIVED=DIR builds into DIR and keeps it, so a second film of the same test
+# builds nothing. The test run gets FILM_MARK, so VMII-style test cases can
+# launch the app in its capture mode (ShowTouches) whenever they are filmed.
+# Wrap it in simq: `simq run -- sim-film ...`.
+set -euo pipefail
+[ $# -eq 5 ] || { sed -n '2,14p' "$0" >&2; exit 2; }
+project="$1"; scheme="$2"; test_id="$3"; device="$4"; out="$5"
+
+work="$(mktemp -d -t sim-film)"
+derived="${DERIVED:-$work/derived}"
+sim=
+trap '[ -z "$sim" ] || xcrun simctl delete "$sim"; rm -rf "$work"' EXIT
+
+xcodebuild build-for-testing -project "$project" -scheme "$scheme" -destination "generic/platform=iOS Simulator" \
+  -derivedDataPath "$derived" -only-testing:"$test_id" -quiet
+
+display=primary
+type="$device"
+[ "$device" = iPhone-Duo-open ] && { type=iPhone-Duo; display=primary-1; }
+sim="$(xcrun simctl create "sim-film $device" "com.apple.CoreSimulator.SimDeviceType.$type")"
+xcrun simctl boot "$sim"
+xcrun simctl bootstatus "$sim" >/dev/null
+[ "$device" = iPhone-Duo-open ] && "$(dirname "$0")/duo-fold" "$sim" open
+xcrun simctl status_bar "$sim" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+  --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+# The keyboard's first-use tips about sliding to type would cover the film.
+for tip in DidShowContinuousPathIntroduction DidShowGestureKeyboardIntroduction; do
+  xcrun simctl spawn "$sim" defaults write com.apple.keyboard.preferences "$tip" -bool true
+done
+
+mark="$work/film"
+TEST_RUNNER_FILM_MARK="$mark" xcodebuild test-without-building -project "$project" -scheme "$scheme" \
+  -destination "platform=iOS Simulator,id=$sim" -derivedDataPath "$derived" -only-testing:"$test_id" \
+  -resultBundlePath "$work/run.xcresult" -quiet &
+running=$!
+await() {
+  until [ -e "$mark.$1" ]; do
+    kill -0 "$running" 2>/dev/null || {
+      xcrun xcresulttool get test-results tests --path "$work/run.xcresult" 2>/dev/null | grep -E '"(name|result)"' >&2 || true
+      echo "sim-film: the test ended before its $1 mark" >&2
+      exit 1
+    }
+    sleep 0.1
+  done
+}
+await start
+xcrun simctl io "$sim" recordVideo --display="$display" --codec h264 --force "$work/film.mp4" &
+recorder=$!
+await end
+kill -INT "$recorder"
+wait "$recorder" || true
+wait "$running" || { echo "sim-film: the test failed after it was filmed" >&2; exit 1; }
+mv "$work/film.mp4" "$out"
+ffprobe -v error -show_entries stream=width,height:format=duration -of csv=p=0 "$out"
