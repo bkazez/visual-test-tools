@@ -30,6 +30,14 @@ derived="${DERIVED:-$work/derived}"
 sim=
 trap '[ -z "$sim" ] || xcrun simctl delete "$sim"; rm -rf "$work"' EXIT
 
+# A Package.resolved the repo does not track is a lock some earlier build left on this Mac, and SwiftPM obeys it: a
+# FlightTrack film was built against a FlightKit a week older than main, missing a type main uses. The film is of
+# the checkout, so such a lock is removed and the build resolves what the checkout names.
+repo="$(git -C "$(dirname "$project")" rev-parse --show-toplevel)"
+git -C "$repo" ls-files -z --others --ignored --exclude-standard -- '*Package.resolved' | while IFS= read -r -d '' lock; do
+  rm "$repo/$lock"; echo "sim-film: removed $lock, a package lock the repo does not track" >&2
+done
+
 xcodebuild build-for-testing -project "$project" -scheme "$scheme" -destination "generic/platform=iOS Simulator" \
   -derivedDataPath "$derived" -only-testing:"$test_id" -quiet
 
