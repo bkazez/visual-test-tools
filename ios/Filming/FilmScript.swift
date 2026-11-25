@@ -28,6 +28,12 @@
 // lead (how long before it lands its touch starts), and where each camera
 // move's place was, in the app's points, top-left origin.
 // Without FILM_BOARD it does nothing, so the test runs unfilmed.
+//
+// A storyboard's `"before"` lists gestures played before the recording rolls,
+// so a film can open in the middle of the product -- the plane already on its
+// arc -- rather than on its first screen:
+//
+//     "before": ["search SFO to ORD", "open UA 2296"]
 
 import XCTest
 
@@ -56,6 +62,8 @@ public struct FilmScript {
     public let slow: Double
     public let gestures: [Gesture]
     public let moves: [Move]
+    /// Gestures played, unfilmed, before the recording rolls: the storyboard's `"before"`.
+    public let before: [String]
 
     public init(path: String) throws {
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -66,6 +74,7 @@ public struct FilmScript {
         seconds = Self.number(board["seconds"]) ?? 30
         let slow = Self.number(board["slow"]) ?? 1
         self.slow = slow
+        before = board["before"] as? [String] ?? []
         gestures = events.compactMap { event in
             guard let step = event["do"] as? String, let at = Self.number(event["at"]) else { return nil }
             return Gesture(at: at, step: step, slow: Self.number(event["slow"]) ?? slow)
@@ -105,17 +114,23 @@ extension XCTestCase {
     /// frames of a simulator recording are its encoder starting up.
     public static let filmLeadIn: TimeInterval = 1.0
 
-    /// Plays the storyboard in FILM_BOARD against APP: marks the start, waits
+    /// Plays the storyboard in FILM_BOARD against APP: plays its `"before"`
+    /// gestures and waits SETTLE seconds for what they opened, marks the start, waits
     /// for the recording, then begins each gesture LEAD seconds before its
     /// moment (a press is held before it lands), aims each camera move at what
     /// the screen calls its place, and marks the end when the film is over.
     public func playFilm(in app: XCUIApplication,
+                         settle: TimeInterval = 0,
                          lead: (String) -> TimeInterval = { _ in 0 },
                          perform: (String) throws -> Void) throws {
         let environment = ProcessInfo.processInfo.environment
         guard let board = environment["FILM_BOARD"] else { return }
         let script = try FilmScript(path: board)
         Self.skipQuiescence()
+        if !script.before.isEmpty {
+            for step in script.before { try perform(step) }
+            Thread.sleep(forTimeInterval: settle)
+        }
         try Self.setFilmPace(script.slow)
         try filmMark("start")
         let rolling = try filmRolling()
