@@ -30,6 +30,8 @@ else
 fi
 
 work="$(mktemp -d -t device-demo)"
+# The result bundle is kept as OUT.xcresult, passed or not: its activities say which step
+# of the test each moment of the video was, and its failures why there is no video.
 "${xcodebuild[@]}" build-for-testing -project "$project" -scheme "$scheme" -destination "$dest" \
   -derivedDataPath "$work/derived" -quiet
 
@@ -69,13 +71,20 @@ if [ "${SIMULATOR:-}" != 1 ]; then
   done
 fi
 
+tested=0
 "${xcodebuild[@]}" test-without-building -xctestrun "$run" -destination "$dest" \
-  -resultBundlePath "$work/result.xcresult" -quiet
+  -resultBundlePath "$work/result.xcresult" -quiet || tested=$?
+mkdir -p "$(dirname "$out")"
+rm -rf "${out%.*}.xcresult"; cp -R "$work/result.xcresult" "${out%.*}.xcresult"
+[ "$tested" = 0 ] || { echo "device-demo: the test failed; its result is ${out%.*}.xcresult" >&2; exit "$tested"; }
 
 xcrun xcresulttool export attachments --path "$work/result.xcresult" --output-path "$work/attachments" >/dev/null
 video="$(find "$work/attachments" -name '*.mp4' -o -name '*.mov' | head -1)"
-[ -n "$video" ] || { echo "device-demo: the test passed but recorded no video ($work)" >&2; exit 1; }
-mkdir -p "$(dirname "$out")"
+if [ -z "$video" ]; then
+  verdict="$(xcrun xcresulttool get test-results summary --path "$work/result.xcresult" | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["result"])')"
+  echo "device-demo: the test recorded no video: it $( [ "$verdict" = Skipped ] && echo "was skipped" || echo "ended $verdict" ) (${out%.*}.xcresult)" >&2
+  exit 1
+fi
 if [ -n "$turn" ]; then
   ffmpeg -loglevel error -y -i "$video" -vf "$turn" -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a copy "$out"
 else
@@ -83,8 +92,7 @@ else
 fi
 # A filmed test (visual-test-tools' Filming, playFilm) attaches its log; it is kept
 # beside the video as OUT.log, with when the recording began, for video-tools'
-# ui-test-film to place the film's zero in it. The result bundle is kept as OUT.xcresult:
-# its activities say which step of the test each moment of the video was.
+# ui-test-film to place the film's zero in it.
 python3 -I - "$work/attachments/manifest.json" "$video" "${out%.*}.log" <<'EOF2'
 import json, os, sys
 manifest, video, out = sys.argv[1], os.path.basename(sys.argv[2]), sys.argv[3]
@@ -95,6 +103,5 @@ if log:
     film["recordingStarted"] = next(a["timestamp"] for a in found if a["exportedFileName"] == video)
     json.dump(film, open(out, "w"), indent=2)
 EOF2
-rm -rf "${out%.*}.xcresult"; cp -R "$work/result.xcresult" "${out%.*}.xcresult"
 seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")"
 echo "$out ($seconds s)"
