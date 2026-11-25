@@ -12,6 +12,7 @@
 #   -s WIDTHxHEIGHT    Viewport size (default: 1280x900)
 #   -f                 Full-page screenshot
 #   -o FILE            Output file (default: /tmp/screenshot.png)
+#   -w SELECTOR        Wait for this element before the shot (a page that loads its data after load)
 #   --user-sel SEL     Email field selector (default: input[name="email"])
 #   --pass-sel SEL     Password field selector (default: input[name="password"])
 #   --submit-sel SEL   Submit button selector (default: button[type="submit"])
@@ -32,6 +33,7 @@ OUTPUT_FILE="/tmp/screenshot.png"
 USER_SEL='input[name="email"]'
 PASS_SEL='input[name="password"]'
 SUBMIT_SEL='button[type="submit"]'
+WAIT_SEL=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -42,6 +44,7 @@ while [ $# -gt 0 ]; do
     -s) IFS='x' read -r VIEWPORT_WIDTH VIEWPORT_HEIGHT <<< "$2"; shift 2 ;;
     -f) FULL_PAGE=true; shift ;;
     -o) OUTPUT_FILE="$2"; shift 2 ;;
+    -w) WAIT_SEL="$2"; shift 2 ;;
     --user-sel) USER_SEL="$2"; shift 2 ;;
     --pass-sel) PASS_SEL="$2"; shift 2 ;;
     --submit-sel) SUBMIT_SEL="$2"; shift 2 ;;
@@ -72,6 +75,7 @@ try {
     page.click('$SUBMIT_SEL'),
   ]);
   await page.goto('$BASE_URL$TARGET_PATH', { waitUntil: 'networkidle2', timeout: 15000 });
+  if ('$WAIT_SEL') await page.waitForSelector('$WAIT_SEL', { timeout: 120000 });
   if ($FULL_PAGE) {
     await page.screenshot({ path: '$OUTPUT_FILE', fullPage: true });
   } else {
