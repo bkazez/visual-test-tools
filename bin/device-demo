@@ -59,6 +59,16 @@ with open(path, "wb") as f:
     plistlib.dump(run, f)
 EOF
 
+# A phone keeps an app's data across installs, where a new simulator starts empty: each
+# app the test runs is taken off the phone first, so every recording starts from a fresh install.
+if [ "${SIMULATOR:-}" != 1 ]; then
+  for app in "$work"/derived/Build/Products/*-iphoneos/*.app; do
+    case "$app" in *-Runner.app) continue ;; esac
+    bundle="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")"
+    xcrun devicectl device uninstall app --device "$DEVICE" "$bundle" >/dev/null 2>&1 || true
+  done
+fi
+
 "${xcodebuild[@]}" test-without-building -xctestrun "$run" -destination "$dest" \
   -resultBundlePath "$work/result.xcresult" -quiet
 
