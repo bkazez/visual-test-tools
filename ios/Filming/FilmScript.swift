@@ -22,7 +22,9 @@
 // loaded Mac -- so the film is cut rather than played in real time: each touch
 // is put on its beat by dropping the still moment before it.
 //
-// It reads FILM_BOARD (the storyboard) and FILM_MARK (sim-film's mark), and
+// It reads FILM_BOARD (the storyboard; FILM_BOARD_JSON on a phone, which cannot
+// read the Mac's files) and FILM_MARK (sim-film's mark), attaches its log to the
+// test's results as "film-log" (device-demo keeps it), and
 // writes FILM_MARK.log: the film's zero in seconds of recording, the app's
 // size in points, when each gesture began and ended, its film moment and its
 // lead (how long before it lands its touch starts), and where each camera
@@ -65,10 +67,19 @@ public struct FilmScript {
     /// Gestures played, unfilmed, before the recording rolls: the storyboard's `"before"`.
     public let before: [String]
 
-    public init(path: String) throws {
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+    /// The storyboard the test is to play: FILM_BOARD names its file on a
+    /// simulator, which can read the Mac's files; on a phone, which cannot,
+    /// FILM_BOARD_JSON is the storyboard itself. Nil when unfilmed.
+    public static func playing() throws -> FilmScript? {
+        let environment = ProcessInfo.processInfo.environment
+        if let json = environment["FILM_BOARD_JSON"] { return try FilmScript(data: Data(json.utf8), from: "FILM_BOARD_JSON") }
+        guard let path = environment["FILM_BOARD"] else { return nil }
+        return try FilmScript(data: Data(contentsOf: URL(fileURLWithPath: path)), from: path)
+    }
+
+    public init(data: Data, from source: String) throws {
         guard let board = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw FilmError.unreadable(path)
+            throw FilmError.unreadable(source)
         }
         let events = (board["events"] as? [[String: Any]] ?? [])
         seconds = Self.number(board["seconds"]) ?? 30
@@ -124,8 +135,7 @@ extension XCTestCase {
                          lead: (String) -> TimeInterval = { _ in 0 },
                          perform: (String) throws -> Void) throws {
         let environment = ProcessInfo.processInfo.environment
-        guard let board = environment["FILM_BOARD"] else { return }
-        let script = try FilmScript(path: board)
+        guard let script = try FilmScript.playing() else { return }
         Self.skipQuiescence()
         if !script.before.isEmpty {
             for step in script.before { try perform(step) }
@@ -164,11 +174,13 @@ extension XCTestCase {
             wait(until: zero + begin)
             let began = Date().timeIntervalSince1970 - zero
             try Self.setFilmPace(gesture.slow)
+            Self.landed = nil
             try perform(gesture.step)
             let ended = Date().timeIntervalSince1970 - zero
+            let landed = Self.landed.map { $0 - zero } ?? ended
             lastFilm = touch
             lastSlow = gesture.slow
-            lastRecording = max(ended - lead(gesture.step), began)
+            lastRecording = max(landed - lead(gesture.step), began)
             gestures.append(["at": gesture.at, "do": gesture.step, "touch": touch, "began": began,
                              "ended": ended, "cut": lastRecording, "slow": gesture.slow])
         }
@@ -177,12 +189,33 @@ extension XCTestCase {
         wait(until: zero + lastRecording + (script.seconds - lastFilm) * lastSlow + 0.5)
         try filmMark("end")
 
-        guard let mark = environment["FILM_MARK"] else { return }
-        let log: [String: Any] = ["zero": zero - rolling, "width": size.width, "height": size.height,
+        // `zero` is seconds into sim-film's recording; on a phone, whose recording is
+        // Xcode's, `zeroDate` (seconds since 1970) is placed against that recording's start.
+        let log: [String: Any] = ["zero": zero - rolling, "zeroDate": zero, "width": size.width, "height": size.height,
                                   "gestures": gestures, "camera": camera]
-        try JSONSerialization.data(withJSONObject: log, options: [.prettyPrinted, .sortedKeys])
-            .write(to: URL(fileURLWithPath: "\(mark).log"))
+        let data = try JSONSerialization.data(withJSONObject: log, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = Self.filmLogName
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        guard let mark = environment["FILM_MARK"] else { return }
+        try data.write(to: URL(fileURLWithPath: "\(mark).log"))
     }
+
+    /// When the gesture being played landed, if it said so (filmLanded).
+    nonisolated(unsafe) private static var landed: TimeInterval?
+
+    /// Says the gesture being played has landed now: a gesture that goes on to
+    /// wait for what it did (a page to go) calls this as its press lifts, so the
+    /// film is cut at the touch and not after the wait. Without it, the gesture
+    /// lands as it returns.
+    public func filmLanded() {
+        Self.landed = Date().timeIntervalSince1970
+    }
+
+    /// The name of the test-results attachment that holds the film's log, which
+    /// visual-test-tools' device-demo keeps beside a phone's recording.
+    public static let filmLogName = "film-log"
 
     /// Where the app reads how many times slower it is to play right now: pass
     /// it to the app as FILM_PACE. playFilm writes each stretch's `"slow"` there

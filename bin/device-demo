@@ -12,6 +12,7 @@
 # switched on in the .xctestrun, so the project needs no test plan for it.
 # It is the phone's portrait framebuffer; ROTATE=90 or 270 (degrees clockwise)
 # turns a landscape app upright, the way a reviewer holds the phone for it.
+# A filmed test's log (Filming's playFilm) is kept beside the video as OUT.log.
 set -euo pipefail
 
 [ $# -eq 4 ] || { sed -n '2,15p' "$0" >&2; exit 2; }
@@ -70,5 +71,18 @@ if [ -n "$turn" ]; then
 else
   cp "$video" "$out"
 fi
+# A filmed test (visual-test-tools' Filming, playFilm) attaches its log; it is kept
+# beside the video as OUT.log, with when the recording began, for video-tools'
+# ui-test-film to place the film's zero in it.
+python3 -I - "$work/attachments/manifest.json" "$video" "${out%.*}.log" <<'EOF2'
+import json, os, sys
+manifest, video, out = sys.argv[1], os.path.basename(sys.argv[2]), sys.argv[3]
+found = [a for test in json.load(open(manifest)) for a in test["attachments"]]
+log = next((a for a in found if a["suggestedHumanReadableName"].startswith("film-log")), None)
+if log:
+    film = json.load(open(os.path.join(os.path.dirname(manifest), log["exportedFileName"])))
+    film["recordingStarted"] = next(a["timestamp"] for a in found if a["exportedFileName"] == video)
+    json.dump(film, open(out, "w"), indent=2)
+EOF2
 seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")"
 echo "$out ($seconds s)"
