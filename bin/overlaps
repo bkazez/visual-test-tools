@@ -1,0 +1,77 @@
+#!/bin/bash
+# Fail a web page where words land on a picture they must stay off: any box the
+# TEXT selector matches that crosses a box the MEDIA selector matches, at every
+# screen size given. Prints one line per collision and exits 1 when there are any.
+#
+# Usage: overlaps -t TEXT_SELECTOR -m MEDIA_SELECTOR [-s SIZES] [-w SECONDS] URL...
+#
+#   -t SELECTOR   the words (e.g. '.hero h1, .hero .download')
+#   -m SELECTOR   what they must not cross (e.g. '.opening .ad-media')
+#   -s SIZES      comma-separated WIDTHxHEIGHT; a size taller than wide is a touch
+#                 phone (default: the phones and windows people use, upright and sideways)
+#   -w SECONDS    wait after load, for fonts and layout scripts (default 1)
+#
+# Example:
+#   overlaps -t '.hero h1, .hero .download' -m '.opening .ad-media' http://localhost:8080/arc-ios/
+
+set -e
+TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SIZES="320x568,360x740,375x667,390x844,430x932,768x1024,667x375,932x430,1024x768,1280x720,1440x900,1920x1080"
+WAIT=1; TEXT=""; MEDIA=""
+while getopts "t:m:s:w:" opt; do
+  case $opt in
+    t) TEXT="$OPTARG" ;;
+    m) MEDIA="$OPTARG" ;;
+    s) SIZES="$OPTARG" ;;
+    w) WAIT="$OPTARG" ;;
+    *) sed -n '2,15p' "$0" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ -n "$TEXT" ] && [ -n "$MEDIA" ] && [ $# -gt 0 ] || { sed -n '2,15p' "$0" >&2; exit 2; }
+
+. "$TOOL_DIR/lib/chrome.sh"
+resolve_chrome || exit 1
+export OV_TEXT="$TEXT" OV_MEDIA="$MEDIA" OV_SIZES="$SIZES" OV_WAIT="$WAIT" OV_CHROME="$CHROME_PATH" OV_HEADLESS="$CHROME_HEADLESS_MODE"
+export OV_URLS="$(printf '%s\n' "$@")"
+
+cd "$TOOL_DIR"
+node --input-type=module -e "
+import puppeteer from 'puppeteer';
+const env = process.env;
+const browser = await puppeteer.launch({ headless: env.OV_HEADLESS === 'shell' ? 'shell' : true, executablePath: env.OV_CHROME });
+let found = 0;
+try {
+  const page = await browser.newPage();
+  for (const url of env.OV_URLS.split('\n').filter(Boolean)) {
+    for (const size of env.OV_SIZES.split(',')) {
+      const [width, height] = size.split('x').map(Number);
+      const phone = height > width && width < 600;
+      await page.setViewport({ width, height, isMobile: phone, hasTouch: phone, deviceScaleFactor: 2 });
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+      await page.evaluate(() => document.fonts.ready);
+      await new Promise(r => setTimeout(r, Number(env.OV_WAIT) * 1000));
+      const hits = await page.evaluate((textSel, mediaSel) => {
+        const boxes = (sel) => [...document.querySelectorAll(sel)].map(el => {
+          const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+          const shown = r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0;
+          return shown && { name: el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).trim().split(/\s+/).join('.') : ''), r };
+        }).filter(Boolean);
+        const out = [];
+        for (const t of boxes(textSel)) for (const m of boxes(mediaSel)) {
+          const x = Math.min(t.r.right, m.r.right) - Math.max(t.r.left, m.r.left);
+          const y = Math.min(t.r.bottom, m.r.bottom) - Math.max(t.r.top, m.r.top);
+          if (x > 0.5 && y > 0.5) out.push(t.name + ' crosses ' + m.name + ' by ' + Math.round(x) + 'x' + Math.round(y) + ' px');
+        }
+        return out;
+      }, env.OV_TEXT, env.OV_MEDIA);
+      for (const h of hits) console.log(url + ' at ' + size + ': ' + h);
+      found += hits.length;
+    }
+  }
+} finally {
+  await browser.close();
+}
+if (found) console.error(found + ' collision' + (found === 1 ? '' : 's'));
+process.exit(found ? 1 : 0);
+"
