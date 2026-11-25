@@ -73,7 +73,8 @@ else
 fi
 # A filmed test (visual-test-tools' Filming, playFilm) attaches its log; it is kept
 # beside the video as OUT.log, with when the recording began, for video-tools'
-# ui-test-film to place the film's zero in it.
+# ui-test-film to place the film's zero in it. The result bundle is kept as OUT.xcresult:
+# its activities say which step of the test each moment of the video was.
 python3 -I - "$work/attachments/manifest.json" "$video" "${out%.*}.log" <<'EOF2'
 import json, os, sys
 manifest, video, out = sys.argv[1], os.path.basename(sys.argv[2]), sys.argv[3]
@@ -84,5 +85,6 @@ if log:
     film["recordingStarted"] = next(a["timestamp"] for a in found if a["exportedFileName"] == video)
     json.dump(film, open(out, "w"), indent=2)
 EOF2
+rm -rf "${out%.*}.xcresult"; cp -R "$work/result.xcresult" "${out%.*}.xcresult"
 seconds="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")"
 echo "$out ($seconds s)"
