@@ -8,6 +8,7 @@
 #   -u URL             Base URL (default: http://localhost:3000)
 #   -a USER:PASS       HTTP basic auth credentials
 #   -s WIDTHxHEIGHT    Viewport size (default: 375x812)
+#   -d SCALE           Device pixels per CSS pixel (default: 1; 2 for a shot a person sees)
 #   -e SELECTOR        CSS selector to clip to (e.g. ".common-searches")
 #   -f                 Full-page screenshot (no clip)
 #   -o FILE            Output file (default: /tmp/screenshot.png)
@@ -28,22 +29,24 @@ AUTH_USER=""
 AUTH_PASS=""
 
 VIEWPORT_WIDTH=375
+SCALE=1
 VIEWPORT_HEIGHT=812
 SELECTOR=""
 FULL_PAGE=false
 OUTPUT_FILE="/tmp/screenshot.png"
 HEADER_PAIRS=()
 
-while getopts "u:a:s:e:fo:H:" opt; do
+while getopts "u:a:s:d:e:fo:H:" opt; do
   case $opt in
     u) BASE_URL="$OPTARG" ;;
     a) IFS=':' read -r AUTH_USER AUTH_PASS <<< "$OPTARG" ;;
     s) IFS='x' read -r VIEWPORT_WIDTH VIEWPORT_HEIGHT <<< "$OPTARG" ;;
+    d) SCALE="$OPTARG" ;;
     e) SELECTOR="$OPTARG" ;;
     f) FULL_PAGE=true ;;
     o) OUTPUT_FILE="$OPTARG" ;;
     H) HEADER_PAIRS+=("$OPTARG") ;;
-    *) echo "Usage: screenshot [-u URL] [-a user:pass] [-s WIDTHxHEIGHT] [-e selector] [-f] [-o file] [-H 'Name: Value'] /path" >&2; exit 1 ;;
+    *) echo "Usage: screenshot [-u URL] [-a user:pass] [-s WIDTHxHEIGHT] [-d SCALE] [-e selector] [-f] [-o file] [-H 'Name: Value'] /path" >&2; exit 1 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -85,7 +88,7 @@ const browser = await puppeteer.launch({
 });
 try {
   const page = await browser.newPage();
-  await page.setViewport({ width: $VIEWPORT_WIDTH, height: $VIEWPORT_HEIGHT });
+  await page.setViewport({ width: $VIEWPORT_WIDTH, height: $VIEWPORT_HEIGHT, deviceScaleFactor: $SCALE });
   $AUTH_JS
   $HEADERS_JS
   // networkidle2 gives fully-loaded pages, but map/streaming pages fetch tiles forever and
